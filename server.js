@@ -183,8 +183,19 @@ const TAGS_BASE = [
 
 
   // ── COLETA DE PROCESSO — tags adicionais ────────────────────────────────────
+  { id:'th_501wf005', label:'TON/H ATUAL 501WF005', tagName:'EA_501WF005_WT_U01_AJUSTE[2]', unit:'t/h', min:0, max:200 },
+  { id:'th_501wf010', label:'TON/H ATUAL 501WF010', tagName:'EA_501WF010_WT_U01_AJUSTE[2]', unit:'t/h', min:0, max:200 },
   { id:'th_502wf005', label:'TON/H ATUAL 502WF005', tagName:'EA_502WF005_WT_U01_AJUSTE[2]', unit:'t/h', min:0, max:200 },
   { id:'th_502wf010', label:'TON/H ATUAL 502WF010', tagName:'EA_502WF010_WT_U01_AJUSTE[2]', unit:'t/h', min:0, max:200 },
+
+  // ── Setpoint (SP) do PID de dosagem de cada balança — mesma unidade (t/h)
+  // da vazão instantânea, porque no L5K o PID roda direto contra
+  // EA_xxxWFxxx_WT_U01_AJUSTE[2] como PV: PID(PID_501WF005, EA_501WF005_WT_U01_AJUSTE[2], 6, ...).
+  // Confirmado nas rotinas GR4_501WF005/GR4_501WF010/GR4_502WF005/GR4_502WF010.
+  { id:'sp_501wf005', label:'SP DOSAGEM 501WF005', tagName:'PID_501WF005.SP', unit:'t/h', min:0, max:200 },
+  { id:'sp_501wf010', label:'SP DOSAGEM 501WF010', tagName:'PID_501WF010.SP', unit:'t/h', min:0, max:200 },
+  { id:'sp_502wf005', label:'SP DOSAGEM 502WF005', tagName:'PID_502WF005.SP', unit:'t/h', min:0, max:200 },
+  { id:'sp_502wf010', label:'SP DOSAGEM 502WF010', tagName:'PID_502WF010.SP', unit:'t/h', min:0, max:200 },
 
   // ── Peso atual das moegas de alimentação (índice [9] do array — mesmo campo usado no ladder pra CHEIA/VAZIA) ──
   { id:'ea_501wf005_wt_u01', label:'PESO MOEGA 501WF005', tagName:'EA_501WF005_WT_U01_AJUSTE[9]', unit:'Kg', min:0, max:15000 },

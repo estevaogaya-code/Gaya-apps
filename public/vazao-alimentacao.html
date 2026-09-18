@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vazão de Alimentação — Moinhos 501/502</title>
+<style>
+  :root {
+    --bg: #0f1620;
+    --panel: #182432;
+    --panel-2: #1f2e40;
+    --border: #2a3b4f;
+    --text: #e6edf5;
+    --text-dim: #8fa3b8;
+    --ok: #2fbf71;
+    --warn: #e8b339;
+    --bad: #e5484d;
+    --accent: #4da3ff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+  body { padding: 12px 16px 32px; }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 8px;
+    margin-bottom: 12px;
+  }
+  h1 { font-size: 1.25rem; margin: 0; font-weight: 600; }
+  .conn { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--text-dim); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--bad); flex-shrink: 0; }
+  .dot.online { background: var(--ok); }
+
+  #banner {
+    display: none;
+    background: var(--bad);
+    color: #fff;
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 14px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    animation: pulse 1.2s infinite;
+  }
+  #banner.show { display: block; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+  .moinhos {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 720px) {
+    .moinhos { grid-template-columns: 1fr; }
+  }
+  .moinho {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+  }
+  .moinho h2 {
+    font-size: 1rem;
+    margin: 0 0 10px;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .feeder {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .feeder:last-child { margin-bottom: 0; }
+  .feeder.alarme {
+    border-color: var(--bad);
+    box-shadow: 0 0 0 1px var(--bad);
+    animation: pulse 1.2s infinite;
+  }
+  .feeder-top {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 6px; flex-wrap: wrap; gap: 6px;
+  }
+  .feeder-name { font-weight: 600; font-size: 0.9rem; color: var(--text-dim); }
+  .badge {
+    font-size: 0.72rem; font-weight: 700; padding: 2px 7px;
+    border-radius: 999px; background: var(--ok); color: #06210f;
+  }
+  .badge.warn { background: var(--warn); color: #2a1c00; }
+  .badge.bad { background: var(--bad); color: #fff; }
+  .badge.off { background: #3a4a5c; color: var(--text-dim); }
+
+  .metrics {
+    display: flex; gap: 18px; align-items: flex-end; flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+  .metric-main .val { font-size: 1.9rem; font-weight: 700; line-height: 1; }
+  .metric-main .lbl { font-size: 0.7rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.03em; }
+  .metric-sub .val { font-size: 1.1rem; font-weight: 600; color: var(--text-dim); }
+  .metric-sub .lbl { font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.03em; }
+  .metric-ctx { margin-left: auto; text-align: right; }
+  .metric-ctx .val { font-size: 0.95rem; font-weight: 600; }
+  .metric-ctx .lbl { font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.03em; }
+
+  canvas.trend { width: 100%; height: 90px; display: block; border-radius: 6px; background: #0c1219; }
+  .legend { display: flex; gap: 14px; font-size: 0.68rem; color: var(--text-dim); margin-top: 4px; }
+  .legend span { display: inline-flex; align-items: center; gap: 4px; }
+  .legend i { width: 14px; height: 2px; display: inline-block; }
+  .legend i.sp { background: #6b7f95; }
+  .legend i.th { background: var(--accent); }
+
+  footer { margin-top: 16px; font-size: 0.72rem; color: var(--text-dim); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Controle de Vazão de Alimentação — Moinhos 501 / 502</h1>
+  <div class="conn"><span class="dot" id="connDot"></span><span id="connTxt">conectando…</span></div>
+</header>
+
+<div id="banner"></div>
+
+<div class="moinhos">
+  <section class="moinho" id="moinho-501">
+    <h2>MOINHO 501</h2>
+    <div class="feeder" id="feeder-501-WF005"></div>
+    <div class="feeder" id="feeder-501-WF010"></div>
+  </section>
+  <section class="moinho" id="moinho-502">
+    <h2>MOINHO 502</h2>
+    <div class="feeder" id="feeder-502-WF005"></div>
+    <div class="feeder" id="feeder-502-WF010"></div>
+  </section>
+</div>
+
+<footer>Alarme visual quando |vazão atual − SP| / SP &gt; 10% (SP acima de 0,5 t/h). Janela do gráfico: últimos 10 minutos.</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var LIMITE_DESVIO_PCT = 10;   // % de desvio que dispara o alarme visual
+  var SP_MIN_AVALIAVEL  = 0.5;  // t/h — abaixo disso a balança é considerada parada, não avalia desvio
+  var JANELA_MS = 10 * 60 * 1000; // 10 min de histórico no gráfico
+  var STALE_MS  = 15000;        // sem atualização há mais que isso = "sem dados"
+
+  var FEEDERS = [
+    { moinho: '501', wf: 'WF005', peso: 'ea_501wf005_wt_u01', th: 'th_501wf005', sp: 'sp_501wf005' },
+    { moinho: '501', wf: 'WF010', peso: 'ea_501wf010_wt_u01', th: 'th_501wf010', sp: 'sp_501wf010' },
+    { moinho: '502', wf: 'WF005', peso: 'ea_502wf005_wt_u01', th: 'th_502wf005', sp: 'sp_502wf005' },
+    { moinho: '502', wf: 'WF010', peso: 'ea_502wf010_wt_u01', th: 'th_502wf010', sp: 'sp_502wf010' },
+  ];
+
+  var state = {}; // key: `${moinho}-${wf}` -> { peso, th, sp, thTs, spTs, thSeries:[], spSeries:[] }
+  FEEDERS.forEach(function (f) {
+    state[f.moinho + '-' + f.wf] = {
+      peso: null, th: null, sp: null, thTs: 0, spTs: 0,
+      thSeries: [], spSeries: [],
+    };
+  });
+
+  var tagIndex = {}; // tagId -> lista de {feederKey, campo}
+  FEEDERS.forEach(function (f) {
+    var key = f.moinho + '-' + f.wf;
+    [['peso', 'peso'], ['th', 'th'], ['sp', 'sp']].forEach(function (pair) {
+      var campo = pair[0], tagId = f[pair[1]];
+      if (!tagIndex[tagId]) tagIndex[tagId] = [];
+      tagIndex[tagId].push({ key: key, campo: campo });
+    });
+  });
+
+  function el(id) { return document.getElementById(id); }
+
+  function fmt(v, dec) {
+    if (v == null || isNaN(v)) return '—';
+    return v.toFixed(dec == null ? 1 : dec);
+  }
+
+  function feederCardHtml(f) {
+    var key = f.moinho + '-' + f.wf;
+    return (
+      '<div class="feeder-top">' +
+        '<span class="feeder-name">' + f.wf + '</span>' +
+        '<span class="badge off" id="badge-' + key + '">—</span>' +
+      '</div>' +
+      '<div class="metrics">' +
+        '<div class="metric-main"><div class="val" id="th-' + key + '">—</div><div class="lbl">Vazão atual (t/h)</div></div>' +
+        '<div class="metric-sub"><div class="val" id="sp-' + key + '">—</div><div class="lbl">SP (t/h)</div></div>' +
+        '<div class="metric-ctx"><div class="val" id="peso-' + key + '">—</div><div class="lbl">Peso balança (kg)</div></div>' +
+      '</div>' +
+      '<canvas class="trend" id="chart-' + key + '"></canvas>' +
+      '<div class="legend"><span><i class="sp"></i>SP</span><span><i class="th"></i>Vazão atual</span></div>'
+    );
+  }
+
+  FEEDERS.forEach(function (f) {
+    el('feeder-' + f.moinho + '-' + f.wf).innerHTML = feederCardHtml(f);
+  });
+
+  function pruneSeries(arr, now) {
+    var lim = now - JANELA_MS;
+    var i = 0;
+    while (i < arr.length && arr[i].ts < lim) i++;
+    if (i > 0) arr.splice(0, i);
+  }
+
+  function drawChart(key) {
+    var canvas = el('chart-' + key);
+    if (!canvas) return;
+    var rect = canvas.getBoundingClientRect();
+    var dpr = window.devicePixelRatio || 1;
+    var w = Math.max(1, Math.round(rect.width * dpr));
+    var h = Math.max(1, Math.round(rect.height * dpr));
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    var ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, w, h);
+
+    var s = state[key];
+    var now = Date.now();
+    var lim = now - JANELA_MS;
+    var allVals = [];
+    s.thSeries.forEach(function (p) { if (p.ts >= lim) allVals.push(p.v); });
+    s.spSeries.forEach(function (p) { if (p.ts >= lim) allVals.push(p.v); });
+    var maxV = allVals.length ? Math.max.apply(null, allVals) : 1;
+    maxV = Math.max(maxV * 1.15, 1);
+
+    function xOf(ts) { return ((ts - lim) / JANELA_MS) * w; }
+    function yOf(v) { return h - (v / maxV) * (h - 6) - 3; }
+
+    function drawLine(series, color, dashed) {
+      var pts = series.filter(function (p) { return p.ts >= lim; });
+      if (pts.length < 2) return;
+      ctx.beginPath();
+      ctx.lineWidth = 2 * dpr;
+      ctx.strokeStyle = color;
+      if (dashed) ctx.setLineDash([5 * dpr, 4 * dpr]); else ctx.setLineDash([]);
+      pts.forEach(function (p, i) {
+        var x = xOf(p.ts), y = yOf(p.v);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    drawLine(s.spSeries, '#6b7f95', true);
+    drawLine(s.thSeries, '#4da3ff', false);
+  }
+
+  function atualizarCard(key) {
+    var s = state[key];
+    var now = Date.now();
+    var stale = (now - s.thTs > STALE_MS) || (now - s.spTs > STALE_MS) || s.th == null || s.sp == null;
+
+    el('th-' + key).textContent = fmt(s.th, 1);
+    el('sp-' + key).textContent = fmt(s.sp, 1);
+    el('peso-' + key).textContent = s.peso == null ? '—' : Math.round(s.peso).toLocaleString('pt-BR');
+
+    var badge = el('badge-' + key);
+    var alarmeAtivo = false;
+
+    if (stale) {
+      badge.className = 'badge off';
+      badge.textContent = 'SEM DADOS';
+    } else if (s.sp < SP_MIN_AVALIAVEL) {
+      badge.className = 'badge off';
+      badge.textContent = 'PARADA';
+    } else {
+      var desvioPct = Math.abs(s.th - s.sp) / s.sp * 100;
+      if (desvioPct > LIMITE_DESVIO_PCT) {
+        badge.className = 'badge bad';
+        badge.textContent = 'DESVIO ' + desvioPct.toFixed(0) + '%';
+        alarmeAtivo = true;
+      } else if (desvioPct > LIMITE_DESVIO_PCT * 0.6) {
+        badge.className = 'badge warn';
+        badge.textContent = desvioPct.toFixed(0) + '%';
+      } else {
+        badge.className = 'badge';
+        badge.textContent = 'OK';
+      }
+    }
+
+    var cardEl = document.getElementById('feeder-' + key);
+    if (cardEl) cardEl.classList.toggle('alarme', alarmeAtivo);
+
+    drawChart(key);
+    return alarmeAtivo;
+  }
+
+  function atualizarBanner() {
+    var emAlarme = [];
+    FEEDERS.forEach(function (f) {
+      var key = f.moinho + '-' + f.wf;
+      if (atualizarCard(key)) emAlarme.push('Moinho ' + f.moinho + ' ' + f.wf);
+    });
+    var banner = el('banner');
+    if (emAlarme.length) {
+      banner.textContent = '⚠ Desvio de vazão acima de ' + LIMITE_DESVIO_PCT + '% do SP em: ' + emAlarme.join(', ');
+      banner.classList.add('show');
+    } else {
+      banner.classList.remove('show');
+    }
+  }
+
+  function receberValor(tagId, valor, ts) {
+    var alvos = tagIndex[tagId];
+    if (!alvos) return;
+    alvos.forEach(function (a) {
+      var s = state[a.key];
+      if (a.campo === 'peso') { s.peso = valor; }
+      else if (a.campo === 'th') {
+        s.th = valor; s.thTs = ts;
+        s.thSeries.push({ ts: ts, v: valor });
+        pruneSeries(s.thSeries, ts);
+      } else if (a.campo === 'sp') {
+        s.sp = valor; s.spTs = ts;
+        s.spSeries.push({ ts: ts, v: valor });
+        pruneSeries(s.spSeries, ts);
+      }
+    });
+  }
+
+  // ── Seed histórico (últimos 10 min) via /api/historico/:tagId ──────────────
+  function seedHistorico() {
+    var agora = Date.now();
+    var inicio = agora - JANELA_MS;
+    var tagIds = Object.keys(tagIndex);
+    tagIds.forEach(function (tagId) {
+      fetch('/api/historico/' + tagId + '?inicio=' + inicio + '&fim=' + agora)
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+          if (!data || !Array.isArray(data.registros)) return;
+          data.registros.forEach(function (r) { receberValor(tagId, r.v, r.ts); });
+          atualizarBanner();
+        })
+        .catch(function () { /* histórico é só pra pré-popular o gráfico — falha aqui não é crítica */ });
+    });
+  }
+
+  // ── WebSocket ────────────────────────────────────────────────────────────
+  var ws = null;
+  function conectar() {
+    var proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(proto + '://' + location.host);
+
+    ws.onopen = function () {
+      el('connDot').classList.add('online');
+      el('connTxt').textContent = 'conectado';
+    };
+    ws.onclose = function () {
+      el('connDot').classList.remove('online');
+      el('connTxt').textContent = 'desconectado — tentando reconectar…';
+      setTimeout(conectar, 3000);
+    };
+    ws.onerror = function () { try { ws.close(); } catch (e) {} };
+
+    ws.onmessage = function (ev) {
+      var msg;
+      try { msg = JSON.parse(ev.data); } catch (e) { return; }
+
+      if (msg.tipo === 'snapshot' && msg.dados) {
+        Object.keys(tagIndex).forEach(function (tagId) {
+          var d = msg.dados[tagId];
+          if (d && d.valor != null) receberValor(tagId, d.valor, d.ts || Date.now());
+        });
+        atualizarBanner();
+      } else if (msg.tipo === 'atualizacao' && tagIndex[msg.tagId]) {
+        receberValor(msg.tagId, msg.valor, msg.ts || Date.now());
+        atualizarBanner();
+      } else if (msg.tipo === 'status') {
+        if (!msg.online) { el('connTxt').textContent = 'CLP offline'; el('connDot').classList.remove('online'); }
+      }
+    };
+  }
+
+  seedHistorico();
+  conectar();
+  setInterval(atualizarBanner, 5000); // mantém o gráfico avançando e re-checa "sem dados" mesmo sem novo evento
+})();
+</script>
+
+</body>
+</html>

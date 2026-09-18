@@ -183,10 +183,15 @@ const TAGS_BASE = [
 
 
   // ── COLETA DE PROCESSO — tags adicionais ────────────────────────────────────
-  { id:'th_501wf005', label:'TON/H ATUAL 501WF005', tagName:'EA_501WF005_WT_U01_AJUSTE[2]', unit:'t/h', min:0, max:200 },
-  { id:'th_501wf010', label:'TON/H ATUAL 501WF010', tagName:'EA_501WF010_WT_U01_AJUSTE[2]', unit:'t/h', min:0, max:200 },
-  { id:'th_502wf005', label:'TON/H ATUAL 502WF005', tagName:'EA_502WF005_WT_U01_AJUSTE[2]', unit:'t/h', min:0, max:200 },
-  { id:'th_502wf010', label:'TON/H ATUAL 502WF010', tagName:'EA_502WF010_WT_U01_AJUSTE[2]', unit:'t/h', min:0, max:200 },
+  // "Vazão ATUAL" (TOTALIZADOR[65]/[67]/[65]/[70]) — cálculo por contador
+  // (COUNTER_VAZAO_ATUAL_xxxWFxxx acumulado a cada 1s, convertido em t/h),
+  // rung "CALCULO DE VAZAO ATUAL" no L5K. Mais estável que a "vazão
+  // INSTANTANEA" (EA_xxxWFxxx_WT_U01_AJUSTE[2], calculada a cada ciclo de
+  // pesagem TIMER_xxxWFxxx_U01) — por isso é essa que a tela de vazão usa.
+  { id:'th_501wf005', label:'TON/H ATUAL 501WF005', tagName:'TOTALIZADOR_501[65]', unit:'t/h', min:0, max:200 },
+  { id:'th_501wf010', label:'TON/H ATUAL 501WF010', tagName:'TOTALIZADOR_501[67]', unit:'t/h', min:0, max:200 },
+  { id:'th_502wf005', label:'TON/H ATUAL 502WF005', tagName:'TOTALIZADOR_502[65]', unit:'t/h', min:0, max:200 },
+  { id:'th_502wf010', label:'TON/H ATUAL 502WF010', tagName:'TOTALIZADOR_502[70]', unit:'t/h', min:0, max:200 },
 
   // ── Setpoint (SP) do PID de dosagem de cada balança — mesma unidade (t/h)
   // da vazão instantânea, porque no L5K o PID roda direto contra

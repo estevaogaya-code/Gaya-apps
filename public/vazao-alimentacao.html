@@ -171,7 +171,7 @@
   </section>
 </div>
 
-<footer>Alarme visual quando |vazão atual − SP| / SP &gt; 10% (só com a esteira rodando — bit de ligado [6] ou corrente &gt; 1A). Janela do gráfico: últimos 10 minutos.</footer>
+<footer>Alarme visual quando |vazão atual − SP| / SP &gt; 10% (só com a esteira rodando — bit de ligado [6] ou corrente &gt; 1A). Janela do gráfico: últimos 45 minutos.</footer>
 
 <script>
 (function () {
@@ -180,7 +180,7 @@
   var LIMITE_DESVIO_PCT = 10;   // % de desvio que dispara o alarme visual
   var SP_MIN_AVALIAVEL  = 0.5;  // t/h — SP abaixo disso não é avaliado (sem alvo definido)
   var CORRENTE_MIN_RODANDO = 1; // A — corrente acima disso conta como "esteira rodando"
-  var JANELA_MS = 10 * 60 * 1000; // 10 min de histórico no gráfico
+  var JANELA_MS = 45 * 60 * 1000; // 45 min de histórico no gráfico
   var STALE_MS  = 15000;        // sem atualização há mais que isso = "sem dados"
 
   var FEEDERS = [

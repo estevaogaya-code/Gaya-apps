@@ -245,6 +245,15 @@ const DINT_TAGS = [
   // porque é o próprio bit de campo, não uma inferência por potência.
   { id: 'm501bm140', tagName: 'M501BM140', label: 'RETORNO DE LIGADO MOINHO 501', area: '501' },
   { id: 'm502bm140', tagName: 'M502BM140', label: 'RETORNO DE LIGADO MOINHO 502', area: '502' },
+  // M50xWFxxx.6 = retorno de ligado da esteira/balança (mesmo bit/convenção
+  // dos motores acima) — usado pela tela de vazão de alimentação pra só
+  // avaliar desvio SP x TH quando a balança está de fato rodando, em vez de
+  // confiar no valor de SP/TH, que fica "congelado" no último valor válido
+  // quando a esteira para (mesmo comportamento já visto nas outras tags AJUSTE).
+  { id: 'm501wf005', tagName: 'M501WF005', label: 'RETORNO DE LIGADO 501WF005', area: '501' },
+  { id: 'm501wf010', tagName: 'M501WF010', label: 'RETORNO DE LIGADO 501WF010', area: '501' },
+  { id: 'm502wf005', tagName: 'M502WF005', label: 'RETORNO DE LIGADO 502WF005', area: '502' },
+  { id: 'm502wf010', tagName: 'M502WF010', label: 'RETORNO DE LIGADO 502WF010', area: '502' },
 ];
 
 // Estado atual dos DINTs — { id: { raw, ligado, trip, sobrecarga, fluxo, emergencia, alarme, ts } }

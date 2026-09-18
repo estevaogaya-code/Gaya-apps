@@ -18,17 +18,23 @@
     --accent: #4da3ff;
   }
   * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; padding: 0; }
   html, body {
-    margin: 0; padding: 0;
     background: var(--bg);
     color: var(--text);
     font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   }
-  body { padding: 12px 16px 32px; }
+  body {
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
   header {
+    flex: 0 0 auto;
     display: flex; align-items: center; justify-content: space-between;
     flex-wrap: wrap; gap: 8px;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
   }
   h1 { font-size: 1.25rem; margin: 0; font-weight: 600; }
   .conn { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--text-dim); }
@@ -36,12 +42,13 @@
   .dot.online { background: var(--ok); }
 
   #banner {
+    flex: 0 0 auto;
     display: none;
     background: var(--bad);
     color: #fff;
     border-radius: 8px;
     padding: 10px 14px;
-    margin-bottom: 14px;
+    margin-bottom: 12px;
     font-weight: 600;
     font-size: 0.95rem;
     animation: pulse 1.2s infinite;
@@ -50,40 +57,57 @@
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
 
   .moinhos {
+    flex: 1 1 auto;
+    min-height: 0;
     display: grid;
     grid-template-columns: 1fr 1fr;
+    grid-auto-rows: 1fr;
     gap: 16px;
   }
   @media (max-width: 720px) {
-    .moinhos { grid-template-columns: 1fr; }
+    .moinhos { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
   }
   .moinho {
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 12px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
   }
   .moinho h2 {
+    flex: 0 0 auto;
     font-size: 1rem;
     margin: 0 0 10px;
     color: var(--accent);
     font-weight: 600;
   }
+  .feeders {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
   .feeder {
+    flex: 1 1 50%;
+    min-height: 0;
     background: var(--panel-2);
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 10px 12px;
-    margin-bottom: 10px;
+    display: flex;
+    flex-direction: column;
     transition: border-color 0.2s, box-shadow 0.2s;
   }
-  .feeder:last-child { margin-bottom: 0; }
   .feeder.alarme {
     border-color: var(--bad);
     box-shadow: 0 0 0 1px var(--bad);
     animation: pulse 1.2s infinite;
   }
   .feeder-top {
+    flex: 0 0 auto;
     display: flex; align-items: baseline; justify-content: space-between;
     margin-bottom: 6px; flex-wrap: wrap; gap: 6px;
   }
@@ -97,25 +121,28 @@
   .badge.off { background: #3a4a5c; color: var(--text-dim); }
 
   .metrics {
+    flex: 0 0 auto;
     display: flex; gap: 18px; align-items: flex-end; flex-wrap: wrap;
     margin-bottom: 8px;
   }
-  .metric-main .val { font-size: 1.9rem; font-weight: 700; line-height: 1; }
+  .metric-main .val { font-size: 1.9rem; font-weight: 700; line-height: 1; transition: color 0.3s; }
   .metric-main .lbl { font-size: 0.7rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.03em; }
-  .metric-sub .val { font-size: 1.1rem; font-weight: 600; color: var(--text-dim); }
+  .metric-sub .val { font-size: 1.1rem; font-weight: 600; color: var(--text-dim); transition: color 0.3s; }
   .metric-sub .lbl { font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.03em; }
   .metric-ctx { margin-left: auto; text-align: right; }
   .metric-ctx .val { font-size: 0.95rem; font-weight: 600; }
   .metric-ctx .lbl { font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.03em; }
+  .val.dim { color: #56677a !important; }
 
-  canvas.trend { width: 100%; height: 90px; display: block; border-radius: 6px; background: #0c1219; }
-  .legend { display: flex; gap: 14px; font-size: 0.68rem; color: var(--text-dim); margin-top: 4px; }
+  .chart-wrap { flex: 1 1 auto; min-height: 0; position: relative; }
+  canvas.trend { width: 100%; height: 100%; display: block; border-radius: 6px; background: #0c1219; }
+  .legend { flex: 0 0 auto; display: flex; gap: 14px; font-size: 0.68rem; color: var(--text-dim); margin-top: 4px; }
   .legend span { display: inline-flex; align-items: center; gap: 4px; }
   .legend i { width: 14px; height: 2px; display: inline-block; }
   .legend i.sp { background: #6b7f95; }
   .legend i.th { background: var(--accent); }
 
-  footer { margin-top: 16px; font-size: 0.72rem; color: var(--text-dim); }
+  footer { flex: 0 0 auto; margin-top: 10px; font-size: 0.72rem; color: var(--text-dim); }
 </style>
 </head>
 <body>
@@ -130,50 +157,59 @@
 <div class="moinhos">
   <section class="moinho" id="moinho-501">
     <h2>MOINHO 501</h2>
-    <div class="feeder" id="feeder-501-WF005"></div>
-    <div class="feeder" id="feeder-501-WF010"></div>
+    <div class="feeders">
+      <div class="feeder" id="feeder-501-WF005"></div>
+      <div class="feeder" id="feeder-501-WF010"></div>
+    </div>
   </section>
   <section class="moinho" id="moinho-502">
     <h2>MOINHO 502</h2>
-    <div class="feeder" id="feeder-502-WF005"></div>
-    <div class="feeder" id="feeder-502-WF010"></div>
+    <div class="feeders">
+      <div class="feeder" id="feeder-502-WF005"></div>
+      <div class="feeder" id="feeder-502-WF010"></div>
+    </div>
   </section>
 </div>
 
-<footer>Alarme visual quando |vazão atual − SP| / SP &gt; 10% (SP acima de 0,5 t/h). Janela do gráfico: últimos 10 minutos.</footer>
+<footer>Alarme visual quando |vazão atual − SP| / SP &gt; 10% (só com a esteira rodando — bit de ligado [6] ou corrente &gt; 1A). Janela do gráfico: últimos 10 minutos.</footer>
 
 <script>
 (function () {
   'use strict';
 
   var LIMITE_DESVIO_PCT = 10;   // % de desvio que dispara o alarme visual
-  var SP_MIN_AVALIAVEL  = 0.5;  // t/h — abaixo disso a balança é considerada parada, não avalia desvio
+  var SP_MIN_AVALIAVEL  = 0.5;  // t/h — SP abaixo disso não é avaliado (sem alvo definido)
+  var CORRENTE_MIN_RODANDO = 1; // A — corrente acima disso conta como "esteira rodando"
   var JANELA_MS = 10 * 60 * 1000; // 10 min de histórico no gráfico
   var STALE_MS  = 15000;        // sem atualização há mais que isso = "sem dados"
 
   var FEEDERS = [
-    { moinho: '501', wf: 'WF005', peso: 'ea_501wf005_wt_u01', th: 'th_501wf005', sp: 'sp_501wf005' },
-    { moinho: '501', wf: 'WF010', peso: 'ea_501wf010_wt_u01', th: 'th_501wf010', sp: 'sp_501wf010' },
-    { moinho: '502', wf: 'WF005', peso: 'ea_502wf005_wt_u01', th: 'th_502wf005', sp: 'sp_502wf005' },
-    { moinho: '502', wf: 'WF010', peso: 'ea_502wf010_wt_u01', th: 'th_502wf010', sp: 'sp_502wf010' },
+    { moinho: '501', wf: 'WF005', peso: 'ea_501wf005_wt_u01', th: 'th_501wf005', sp: 'sp_501wf005', corrente: 'ea_rede_501wf005_c', digital: 'm501wf005' },
+    { moinho: '501', wf: 'WF010', peso: 'ea_501wf010_wt_u01', th: 'th_501wf010', sp: 'sp_501wf010', corrente: 'ea_rede_501wf010_c', digital: 'm501wf010' },
+    { moinho: '502', wf: 'WF005', peso: 'ea_502wf005_wt_u01', th: 'th_502wf005', sp: 'sp_502wf005', corrente: 'ea_rede_502wf005_c', digital: 'm502wf005' },
+    { moinho: '502', wf: 'WF010', peso: 'ea_502wf010_wt_u01', th: 'th_502wf010', sp: 'sp_502wf010', corrente: 'ea_rede_502wf010_c', digital: 'm502wf010' },
   ];
 
-  var state = {}; // key: `${moinho}-${wf}` -> { peso, th, sp, thTs, spTs, thSeries:[], spSeries:[] }
+  // key: `${moinho}-${wf}` -> { peso, th, sp, corrente, ligado, thTs, spTs, correnteTs, ligadoTs, thSeries:[], spSeries:[] }
+  var state = {};
   FEEDERS.forEach(function (f) {
     state[f.moinho + '-' + f.wf] = {
-      peso: null, th: null, sp: null, thTs: 0, spTs: 0,
+      peso: null, th: null, sp: null, corrente: null, ligado: null,
+      thTs: 0, spTs: 0, correnteTs: 0, ligadoTs: 0,
       thSeries: [], spSeries: [],
     };
   });
 
-  var tagIndex = {}; // tagId -> lista de {feederKey, campo}
+  var tagIndex = {};      // tagId (analógico) -> [{key, campo}]
+  var digitalIndex = {};  // tagId (digital)   -> key
   FEEDERS.forEach(function (f) {
     var key = f.moinho + '-' + f.wf;
-    [['peso', 'peso'], ['th', 'th'], ['sp', 'sp']].forEach(function (pair) {
+    [['peso', 'peso'], ['th', 'th'], ['sp', 'sp'], ['corrente', 'corrente']].forEach(function (pair) {
       var campo = pair[0], tagId = f[pair[1]];
       if (!tagIndex[tagId]) tagIndex[tagId] = [];
       tagIndex[tagId].push({ key: key, campo: campo });
     });
+    digitalIndex[f.digital] = key;
   });
 
   function el(id) { return document.getElementById(id); }
@@ -195,7 +231,7 @@
         '<div class="metric-sub"><div class="val" id="sp-' + key + '">—</div><div class="lbl">SP (t/h)</div></div>' +
         '<div class="metric-ctx"><div class="val" id="peso-' + key + '">—</div><div class="lbl">Peso balança (kg)</div></div>' +
       '</div>' +
-      '<canvas class="trend" id="chart-' + key + '"></canvas>' +
+      '<div class="chart-wrap"><canvas class="trend" id="chart-' + key + '"></canvas></div>' +
       '<div class="legend"><span><i class="sp"></i>SP</span><span><i class="th"></i>Vazão atual</span></div>'
     );
   }
@@ -211,7 +247,7 @@
     if (i > 0) arr.splice(0, i);
   }
 
-  function drawChart(key) {
+  function drawChart(key, rodando) {
     var canvas = el('chart-' + key);
     if (!canvas) return;
     var rect = canvas.getBoundingClientRect();
@@ -249,8 +285,11 @@
       ctx.setLineDash([]);
     }
 
-    drawLine(s.spSeries, '#6b7f95', true);
-    drawLine(s.thSeries, '#4da3ff', false);
+    // Esteira parada: linhas em tom apagado — sem "vida" visual — em vez das
+    // cores normais, pra deixar claro que os valores não representam
+    // operação real (podem estar apenas congelados no último valor lido).
+    drawLine(s.spSeries, rodando ? '#6b7f95' : '#3a4452', true);
+    drawLine(s.thSeries, rodando ? '#4da3ff' : '#4a5666', false);
   }
 
   function atualizarCard(key) {
@@ -258,8 +297,22 @@
     var now = Date.now();
     var stale = (now - s.thTs > STALE_MS) || (now - s.spTs > STALE_MS) || s.th == null || s.sp == null;
 
-    el('th-' + key).textContent = fmt(s.th, 1);
-    el('sp-' + key).textContent = fmt(s.sp, 1);
+    // "Rodando" de verdade: bit de retorno de ligado [6] OU corrente > 1A —
+    // nunca pelo valor de SP/TH, que fica congelado no último valor válido
+    // quando a esteira para (mesmo comportamento das tags AJUSTE do CLP).
+    // Sem nenhum dos dois sinais (nem bit nem corrente) ainda lido, cai de
+    // volta no SP como estimativa — só pra não travar tudo em "PARADA" se
+    // essa leitura falhar pontualmente.
+    var temSinalDireto = s.ligado != null || s.corrente != null;
+    var rodando = temSinalDireto
+      ? (s.ligado === true || (s.corrente != null && s.corrente > CORRENTE_MIN_RODANDO))
+      : (s.sp != null && s.sp >= SP_MIN_AVALIAVEL);
+
+    var thEl = el('th-' + key), spEl = el('sp-' + key);
+    thEl.textContent = fmt(s.th, 1);
+    spEl.textContent = fmt(s.sp, 1);
+    thEl.classList.toggle('dim', !rodando);
+    spEl.classList.toggle('dim', !rodando);
     el('peso-' + key).textContent = s.peso == null ? '—' : Math.round(s.peso).toLocaleString('pt-BR');
 
     var badge = el('badge-' + key);
@@ -268,9 +321,12 @@
     if (stale) {
       badge.className = 'badge off';
       badge.textContent = 'SEM DADOS';
-    } else if (s.sp < SP_MIN_AVALIAVEL) {
+    } else if (!rodando) {
       badge.className = 'badge off';
       badge.textContent = 'PARADA';
+    } else if (s.sp < SP_MIN_AVALIAVEL) {
+      badge.className = 'badge';
+      badge.textContent = 'OK';
     } else {
       var desvioPct = Math.abs(s.th - s.sp) / s.sp * 100;
       if (desvioPct > LIMITE_DESVIO_PCT) {
@@ -289,7 +345,7 @@
     var cardEl = document.getElementById('feeder-' + key);
     if (cardEl) cardEl.classList.toggle('alarme', alarmeAtivo);
 
-    drawChart(key);
+    drawChart(key, rodando);
     return alarmeAtivo;
   }
 
@@ -314,6 +370,7 @@
     alvos.forEach(function (a) {
       var s = state[a.key];
       if (a.campo === 'peso') { s.peso = valor; }
+      else if (a.campo === 'corrente') { s.corrente = valor; s.correnteTs = ts; }
       else if (a.campo === 'th') {
         s.th = valor; s.thTs = ts;
         s.thSeries.push({ ts: ts, v: valor });
@@ -326,12 +383,18 @@
     });
   }
 
+  function receberDigital(tagId, ligado, ts) {
+    var key = digitalIndex[tagId];
+    if (!key || ligado == null) return;
+    state[key].ligado = ligado;
+    state[key].ligadoTs = ts;
+  }
+
   // ── Seed histórico (últimos 10 min) via /api/historico/:tagId ──────────────
   function seedHistorico() {
     var agora = Date.now();
     var inicio = agora - JANELA_MS;
-    var tagIds = Object.keys(tagIndex);
-    tagIds.forEach(function (tagId) {
+    Object.keys(tagIndex).forEach(function (tagId) {
       fetch('/api/historico/' + tagId + '?inicio=' + inicio + '&fim=' + agora)
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (data) {
@@ -372,6 +435,15 @@
         atualizarBanner();
       } else if (msg.tipo === 'atualizacao' && tagIndex[msg.tagId]) {
         receberValor(msg.tagId, msg.valor, msg.ts || Date.now());
+        atualizarBanner();
+      } else if (msg.tipo === 'snapshot_digital' && msg.dados) {
+        Object.keys(digitalIndex).forEach(function (tagId) {
+          var d = msg.dados[tagId];
+          if (d) receberDigital(tagId, d.ligado, d.ts || Date.now());
+        });
+        atualizarBanner();
+      } else if (msg.tipo === 'digital' && digitalIndex[msg.id]) {
+        receberDigital(msg.id, msg.ligado, msg.ts || Date.now());
         atualizarBanner();
       } else if (msg.tipo === 'status') {
         if (!msg.online) { el('connTxt').textContent = 'CLP offline'; el('connDot').classList.remove('online'); }

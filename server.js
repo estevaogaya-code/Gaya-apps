@@ -2711,17 +2711,16 @@ async function iniciarEthernetIP() {
   process.on('SIGINT',  () => shutdownGracioso('SIGINT'));
   process.on('SIGTERM', () => shutdownGracioso('SIGTERM'));
 
-  // Restart automático a cada 90 minutos — feito pelo PRÓPRIO processo, não
-  // pelo cron do PM2. 90 min não é múltiplo de 60, então o cron do PM2 não
-  // consegue expressar isso com precisão de verdade (só divide dentro de
-  // "minutos de 0 a 59 por hora" — dá pra chegar perto com truques, mas não
-  // dá exato). O PM2 já relança o processo sozinho assim que ele sai
+  // Restart automático a cada 33 minutos — feito pelo PRÓPRIO processo, não
+  // pelo cron do PM2 (que só divide com precisão dentro de "minutos de 0 a
+  // 59 por hora" — não dá pra expressar exato um intervalo que não é
+  // múltiplo de 60). O PM2 já relança o processo sozinho assim que ele sai
   // (comportamento padrão em fork mode, contanto que ninguém tenha rodado
   // "pm2 stop"), então um shutdown limpo aqui funciona como restart
   // automático preciso. Recomeça a contar do zero a cada novo processo, então
   // continua valendo depois de qualquer restart (manual, por cron antigo, ou
   // por esse próprio timer).
-  setTimeout(() => shutdownGracioso('RESTART_PROGRAMADO_90MIN'), 90 * 60 * 1000);
+  setTimeout(() => shutdownGracioso('RESTART_PROGRAMADO_33MIN'), 33 * 60 * 1000);
 }
 
 // SO_REUSEADDR via listen options — permite reusar porta em TIME_WAIT sem retry

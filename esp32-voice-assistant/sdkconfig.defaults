@@ -1,0 +1,29 @@
+# Defaults para ESP32-S3 DevKitC-1 (N16R8 tipico: 16MB flash, 8MB PSRAM octal).
+# Ajuste via `idf.py menuconfig` conforme o modulo real.
+
+CONFIG_IDF_TARGET="esp32s3"
+
+# PSRAM: necessaria para os buffers de audio e, futuramente, para os
+# modelos do WakeNet/MultiNet (ESP-SR). Sem PSRAM o firmware ainda roda
+# no modo push-to-talk, mas o wake word continuo fica inviavel.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCTAL=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+
+# Flash de 16MB com a tabela de particoes customizada em partitions.csv.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# USB-Serial-JTAG embutido no ESP32-S3 DevKitC-1.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# FreeRTOS tick em 1000Hz ajuda a suavizar a animacao do circulo pulsante.
+CONFIG_FREERTOS_HZ=1000
+
+# Pilha maior para as tasks de audio/rede que fazem parsing de JSON e TLS.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# mbedTLS/esp_http_client precisam disso para falar HTTPS com a API de IA.
+CONFIG_MBEDTLS_TLS_CLIENT_ONLY=y

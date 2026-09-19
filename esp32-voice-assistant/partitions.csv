@@ -1,0 +1,11 @@
+# Name,   Type, SubType, Offset,  Size,     Flags
+nvs,       data, nvs,     0x9000,  0x6000,
+phy_init,  data, phy,     0xf000,  0x1000,
+factory,   app,  factory, 0x10000, 3M,
+# Partition reservada para os modelos do ESP-SR (WakeNet + MultiNet).
+# Tamanho aproximado; ajuste conforme os modelos escolhidos no menuconfig
+# do componente esp-sr (wn9_hiesp ~ poucas centenas de KB, MultiNet
+# em portugues nao existe oficialmente - ver README). Precisa de flash
+# de pelo menos 8MB no modulo para sobrar espaco com esta reserva.
+model,     data, spiffs,  0x400000,2M,
+storage,   data, spiffs,  0x600000,1M,

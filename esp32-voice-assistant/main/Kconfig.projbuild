@@ -1,0 +1,60 @@
+menu "Voice Assistant Configuration"
+
+    menu "Wi-Fi (tethering do celular)"
+        config VA_WIFI_SSID
+            string "SSID"
+            default "meu-celular"
+            help
+                Nome da rede Wi-Fi (tipicamente o hotspot/tethering do celular
+                usado como uplink no carro).
+
+        config VA_WIFI_PASSWORD
+            string "Senha"
+            default "mudeesta"
+            help
+                Senha da rede Wi-Fi. Considere usar `idf.py menuconfig` com o
+                sdkconfig fora do controle de versao, ou mover isto para NVS
+                em producao em vez de deixar em texto plano no firmware.
+
+        config VA_WIFI_MAX_RETRY
+            int "Tentativas de reconexao antes de esperar"
+            default 5
+    endmenu
+
+    menu "API de IA (fallback online)"
+        config VA_AI_API_URL
+            string "URL do endpoint de chat (texto -> texto)"
+            default "https://api.example.com/v1/assistant/query"
+            help
+                Endpoint HTTPS que recebe o texto reconhecido (ou audio) e
+                devolve JSON { "response_text": "...", "tts_audio_url": "..." }.
+                Ver network/ai_client.h para o contrato exato.
+
+        config VA_AI_API_KEY
+            string "API key"
+            default ""
+            help
+                Enviada como header Authorization: Bearer <key>. Nao commitar
+                uma key real no sdkconfig; prefira sdkconfig.local ou NVS.
+
+        config VA_AI_HTTP_TIMEOUT_MS
+            int "Timeout HTTP (ms)"
+            default 15000
+    endmenu
+
+    menu "Hardware"
+        config VA_PIN_PTT_BUTTON
+            int "GPIO do botao push-to-talk (fallback seguro para dirigir)"
+            default 0
+            help
+                Botao fisico momentaneo para GND, com pull-up interno. E a
+                alternativa recomendada ao wake word enquanto dirige, ja que
+                nao existe wake word customizada em portugues homologada.
+
+        config VA_DISPLAY_BACKLIGHT_DUTY_PERCENT
+            int "Duty inicial do backlight (%)"
+            default 80
+            range 0 100
+    endmenu
+
+endmenu

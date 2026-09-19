@@ -1,0 +1,31 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "app/app_state.c"
+        "display/st7735.c"
+        "display/ui_screens.c"
+        "audio/i2s_mic.c"
+        "audio/i2s_speaker.c"
+        "audio/tts_player.c"
+        "voice/wakeword.c"
+        "voice/commands.c"
+        "network/wifi_manager.c"
+        "network/ai_client.c"
+    INCLUDE_DIRS
+        "."
+        "app"
+        "display"
+        "audio"
+        "voice"
+        "network"
+    REQUIRES
+        driver
+        esp_wifi
+        esp_netif
+        esp_event
+        esp_http_client
+        esp_timer
+        nvs_flash
+        json
+        lwip
+)

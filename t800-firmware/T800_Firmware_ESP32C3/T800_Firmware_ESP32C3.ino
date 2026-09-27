@@ -221,7 +221,7 @@ const int servoCenterAngle[NUM_SERVOS] = { YAW_CENTER, EYE_L_CENTER, EYE_R_CENTE
 // olho que gira para a esquerda quando a cabeca vai para a direita). So
 // inverte o SENTIDO - nao muda os limites min/max/centro do eixo. Ajuste
 // aqui e regrave; nao precisa mexer em mais nada.
-bool invertServo[NUM_SERVOS] = { false, false, false };  // { YAW, EYE_L, EYE_R }
+bool invertServo[NUM_SERVOS] = { true, false, false };  // { YAW, EYE_L, EYE_R }
 
 int angleToPulseUs(uint8_t idx, int angle) {
   angle = constrain(angle, 0, 180);

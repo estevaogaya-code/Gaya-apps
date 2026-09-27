@@ -103,13 +103,15 @@ const int servoPins[NUM_SERVOS] = { PIN_SERVO_YAW, PIN_SERVO_EYE_L, PIN_SERVO_EY
 #define YAW_MAX     180
 #define YAW_CENTER  90
 
-#define EYE_L_MIN    60
-#define EYE_L_MAX    120
-#define EYE_L_CENTER 62   // centro mecanico real, medido com o sketch de teste isolado (sem trim)
+// Curso simetrico de +-30 graus (60 graus de liberdade) em torno do centro
+// mecanico real de cada olho, medido com o sketch de teste isolado (sem trim).
+#define EYE_L_MIN    32
+#define EYE_L_MAX    92
+#define EYE_L_CENTER 62
 
-#define EYE_R_MIN    60
-#define EYE_R_MAX    120
-#define EYE_R_CENTER 65   // centro mecanico real, medido com o sketch de teste isolado (sem trim)
+#define EYE_R_MIN    35
+#define EYE_R_MAX    95
+#define EYE_R_CENTER 65
 
 // ---------------------------------------------------------------------------
 // SENSOR - alcance de deteccao (cm) que dispara a sequencia de movimento
@@ -440,12 +442,12 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
     <input type="range" min="0" max="180" value="90" id="yaw" oninput="sendMove()">
   </div>
   <div class="slider-box">
-    <label>OLHO ESQUERDO: <span id="eyeLVal">90</span></label>
-    <input type="range" min="60" max="120" value="90" id="eyeL" oninput="sendMove()">
+    <label>OLHO ESQUERDO: <span id="eyeLVal">62</span></label>
+    <input type="range" min="32" max="92" value="62" id="eyeL" oninput="sendMove()">
   </div>
   <div class="slider-box">
-    <label>OLHO DIREITO: <span id="eyeRVal">90</span></label>
-    <input type="range" min="60" max="120" value="90" id="eyeR" oninput="sendMove()">
+    <label>OLHO DIREITO: <span id="eyeRVal">65</span></label>
+    <input type="range" min="35" max="95" value="65" id="eyeR" oninput="sendMove()">
   </div>
 
   <hr style="border-color:#333; margin:24px 0;">

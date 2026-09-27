@@ -67,8 +67,8 @@
 // PINOUT - ESP32-C3 (evitados: GPIO2/8/9 = strapping, GPIO20/21 = UART0/USB)
 // ---------------------------------------------------------------------------
 #define PIN_SERVO_YAW     7
-#define PIN_SERVO_EYE_L   4
-#define PIN_SERVO_EYE_R   5
+#define PIN_SERVO_EYE_L   5   // fisicamente o olho ESQUERDO - confirmado no teste isolado
+#define PIN_SERVO_EYE_R   4   // fisicamente o olho DIREITO - confirmado no teste isolado
 
 #define PIN_HCSR04_TRIG   3   // saida direta do ESP32 (3,3V) - ok sem protecao
 #define PIN_HCSR04_ECHO   10  // ENTRADA - usar divisor de tensao 5V->3,3V (ver aviso acima)
@@ -105,11 +105,11 @@ const int servoPins[NUM_SERVOS] = { PIN_SERVO_YAW, PIN_SERVO_EYE_L, PIN_SERVO_EY
 
 #define EYE_L_MIN    60
 #define EYE_L_MAX    120
-#define EYE_L_CENTER 90
+#define EYE_L_CENTER 62   // centro mecanico real, medido com o sketch de teste isolado (sem trim)
 
 #define EYE_R_MIN    60
 #define EYE_R_MAX    120
-#define EYE_R_CENTER 90
+#define EYE_R_CENTER 65   // centro mecanico real, medido com o sketch de teste isolado (sem trim)
 
 // ---------------------------------------------------------------------------
 // SENSOR - alcance de deteccao (cm) que dispara a sequencia de movimento
@@ -198,13 +198,13 @@ unsigned long yawRampDurationMs = 0;
 unsigned long lastSensorCheckMs = 0;
 #define SENSOR_CHECK_INTERVAL_MS 300UL
 
-// Trim de calibracao do centro/zero, em MICROSSEGUNDOS de pulso. Indexado
-// por IDX_YAW/IDX_EYE_L/IDX_EYE_R. Persistido em NVS (Preferences).
-// Ajustavel pela interface web.
-// Ponto central de ajuste dos olhos: na bancada, o centro mecanico real dos
-// dois olhos ficou em -300us (no limite da faixa de trim) em vez de 0 -
-// usado como valor padrao (antes de qualquer calibracao salva na NVS).
-int trimPulseUs[NUM_SERVOS] = {0, -300, -300};
+// Trim de calibracao fina, em MICROSSEGUNDOS de pulso, somado ao pulso do
+// angulo comandado. Indexado por IDX_YAW/IDX_EYE_L/IDX_EYE_R. Persistido em
+// NVS (Preferences). Ajustavel pela interface web.
+// O centro mecanico real dos olhos ja esta embutido em EYE_L_CENTER/
+// EYE_R_CENTER (medido isoladamente, sem trim) - por isso o trim volta a
+// comecar em 0, com toda a faixa de +-300us livre para ajuste fino.
+int trimPulseUs[NUM_SERVOS] = {0, 0, 0};
 #define TRIM_LIMIT_US 300   // faixa de ajuste permitida, em us
 
 // ---------------------------------------------------------------------------
@@ -455,12 +455,12 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
     <input type="range" min="-300" max="300" value="0" id="trimYaw" oninput="sendTrim()">
   </div>
   <div class="slider-box">
-    <label>Trim OLHO ESQUERDO: <span id="trimEyeLVal">-300</span></label>
-    <input type="range" min="-300" max="300" value="-300" id="trimEyeL" oninput="sendTrim()">
+    <label>Trim OLHO ESQUERDO: <span id="trimEyeLVal">0</span></label>
+    <input type="range" min="-300" max="300" value="0" id="trimEyeL" oninput="sendTrim()">
   </div>
   <div class="slider-box">
-    <label>Trim OLHO DIREITO: <span id="trimEyeRVal">-300</span></label>
-    <input type="range" min="-300" max="300" value="-300" id="trimEyeR" oninput="sendTrim()">
+    <label>Trim OLHO DIREITO: <span id="trimEyeRVal">0</span></label>
+    <input type="range" min="-300" max="300" value="0" id="trimEyeR" oninput="sendTrim()">
   </div>
   <div class="toggle-box">
     <button onclick="saveTrim()">SALVAR CALIBRACAO</button>
@@ -662,8 +662,8 @@ void setup() {
   prefs.begin("t800", false);
   currentMode = (ControlMode)prefs.getUChar("mode", MODE_SENSOR);
   trimPulseUs[IDX_YAW]   = prefs.getInt("trimYaw",  0);
-  trimPulseUs[IDX_EYE_L] = prefs.getInt("trimEyeL", -300);
-  trimPulseUs[IDX_EYE_R] = prefs.getInt("trimEyeR", -300);
+  trimPulseUs[IDX_EYE_L] = prefs.getInt("trimEyeL", 0);
+  trimPulseUs[IDX_EYE_R] = prefs.getInt("trimEyeR", 0);
 
   // --- servos: anexa e ja escreve a posicao central correta na mesma
   //     iteracao, servo por servo - sem gap entre attach() e o pulso certo ---

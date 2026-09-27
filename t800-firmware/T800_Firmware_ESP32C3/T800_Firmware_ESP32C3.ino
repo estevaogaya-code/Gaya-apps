@@ -131,6 +131,12 @@ const int servoPins[NUM_SERVOS] = { PIN_SERVO_YAW, PIN_SERVO_EYE_L, PIN_SERVO_EY
 #define SEQ_HEAD_HOLD_PAUSE_MS     3000UL  // pausa parado no extremo
 #define SEQ_CENTER_PAUSE_MS        3000UL  // pausa parado no centro
 
+// Pequena pausa tecnica (nao e parte da coreografia) entre comandar os olhos
+// de volta ao centro e iniciar a rampa do YAW - evita comandar os 2 olhos e
+// o YAW praticamente no mesmo instante, no caso de isso pesar na fonte
+// compartilhada dos 3 servos.
+#define SEQ_RETURN_STAGGER_MS      250UL
+
 // Velocidade angular da cabeca (YAW), em graus/segundo. Os olhos sao servos
 // leves e vao no proprio limite mecanico deles ao receber o comando (~500-600
 // graus/s, valor tipico de datasheet de micro servo tipo MG90S sem carga) -
@@ -173,6 +179,7 @@ enum SeqState {
   SEQ_HEAD_MOVING_TO_SIDE,
   SEQ_WAIT_AT_EXTREME,
   SEQ_RETURN_CENTER,
+  SEQ_WAIT_BEFORE_HEAD_RETURN,
   SEQ_HEAD_MOVING_TO_CENTER,
   SEQ_WAIT_AT_CENTER
 };
@@ -339,14 +346,23 @@ void updateSequence() {
       break;
 
     case SEQ_RETURN_CENTER:
-      // olhos voltam ao centro na hora (mesmo criterio de "abruptamente");
-      // a cabeca comeca a rampa de volta, tambem a 1/4 da velocidade dos olhos.
+      // olhos voltam ao centro na hora (mesmo criterio de "abruptamente").
       posEyeL = EYE_L_CENTER;
       posEyeR = EYE_R_CENTER;
       setServoAngle(IDX_EYE_L, posEyeL);
       setServoAngle(IDX_EYE_R, posEyeR);
-      startYawRamp(YAW_CENTER);
-      seqState = SEQ_HEAD_MOVING_TO_CENTER;
+      seqTimerMs = now;
+      seqState = SEQ_WAIT_BEFORE_HEAD_RETURN;
+      break;
+
+    case SEQ_WAIT_BEFORE_HEAD_RETURN:
+      // pequena pausa tecnica antes de iniciar a rampa do YAW (ver
+      // SEQ_RETURN_STAGGER_MS acima) - so entao a cabeca comeca a rampa de
+      // volta ao centro, tambem a 1/4 da velocidade dos olhos.
+      if (now - seqTimerMs >= SEQ_RETURN_STAGGER_MS) {
+        startYawRamp(YAW_CENTER);
+        seqState = SEQ_HEAD_MOVING_TO_CENTER;
+      }
       break;
 
     case SEQ_HEAD_MOVING_TO_CENTER:

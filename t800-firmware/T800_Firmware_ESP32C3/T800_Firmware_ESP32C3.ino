@@ -314,7 +314,7 @@ void updateSequence() {
 
     case SEQ_EYES_TO_SIDE:
       seqSetEyesToSide(seqDir);
-      analogWrite(PIN_EYE_LED, 255);
+      digitalWrite(PIN_EYE_LED, HIGH);
       seqTimerMs = now;
       seqState = SEQ_WAIT_BEFORE_HEAD;
       break;
@@ -381,7 +381,7 @@ void updateSequence() {
           seqState = SEQ_EYES_TO_SIDE;
         } else {
           // as duas direcoes concluidas - encerra e aguarda novo disparo
-          analogWrite(PIN_EYE_LED, 0);
+          digitalWrite(PIN_EYE_LED, LOW);
           releaseServos();
           seqState = SEQ_IDLE;
           Serial.println("Sequencia concluida - aguardando novo disparo do sensor");
@@ -664,9 +664,10 @@ void setup() {
   pinMode(PIN_HCSR04_TRIG, OUTPUT);
   pinMode(PIN_HCSR04_ECHO, INPUT);
 
-  // --- LED do olho ---
+  // --- LED do olho (so usa 0/255 nesta versao - digitalWrite direto, sem
+  //     passar pelo periferico LEDC, que os 3 servos tambem usam) ---
   pinMode(PIN_EYE_LED, OUTPUT);
-  analogWrite(PIN_EYE_LED, 0);
+  digitalWrite(PIN_EYE_LED, LOW);
 
   // --- preferencias / modo e calibracao salvos - CARREGADAS ANTES DE
   //     ANEXAR OS SERVOS DE PROPOSITO. A biblioteca ESP32Servo aplica um

@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Receitas Moinhos</title>
+<!--
+  ═══════════════════════════════════════════════════════════════════════════
+  TELA MOBILE — EDIÇÃO DE RECEITAS 501/502  (ÚNICA TELA MOBILE COM ESCRITA)
+  ═══════════════════════════════════════════════════════════════════════════
+  Escreve no CLP via server.js -> receitas.js:
+    GET    /api/receitas                 leitura das duas linhas + presets
+    POST   /api/receitas/auth            valida o PIN (cabeçalho x-receitas-pin)
+    POST   /api/receitas/:linha          grava pct[1..9] + nº de componentes
+    POST   /api/receitas/presets/:linha  salva preset   (PIN)
+    DELETE /api/receitas/presets/:l/:n   exclui preset  (PIN)
+    GET    /api/receitas/log             auditoria
+  Toda validação de verdade é feita no servidor; a daqui é só para orientar.
+  O PIN fica só na memória da página (recarregou = digita de novo).
+  ═══════════════════════════════════════════════════════════════════════════
+-->
+<style>
+  :root{
+    --bg:#0b1220; --card:#131c2e; --card-b:#1f2c44; --txt:#e6edf6; --txt-dim:#8493ab;
+    --ok:#22c55e; --off:#4b5568; --bad:#ef4444; --warn:#f59e0b; --accent:#3b82f6;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    -webkit-tap-highlight-color:transparent;
+  }
+  button{font-family:inherit;}
+  #lock-screen{
+    position:fixed; inset:0; z-index:100; background:var(--bg);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:24px; gap:14px; text-align:center;
+  }
+  #lock-screen.hidden{display:none;}
+  #lock-screen .lock-icon{font-size:34px;}
+  #lock-screen h1{font-size:16px; margin:0; font-weight:700;}
+  #lock-screen p{font-size:12px; color:var(--txt-dim); margin:0; max-width:300px;}
+  #lock-form{display:flex; flex-direction:column; gap:10px; width:100%; max-width:260px; margin-top:8px;}
+  .inp{
+    background:var(--card); border:1px solid var(--card-b); color:var(--txt);
+    padding:12px 14px; border-radius:10px; font-size:16px; outline:none; width:100%;
+  }
+  .inp:focus{border-color:var(--accent);}
+  #lock-form .inp{text-align:center;}
+  .btn{
+    background:var(--accent); color:#fff; border:none; padding:12px 14px;
+    border-radius:10px; font-size:14px; font-weight:700; cursor:pointer;
+  }
+  .btn:disabled{background:var(--off); color:var(--txt-dim); cursor:not-allowed;}
+  .btn.sec{background:var(--card); color:var(--txt); border:1px solid var(--card-b);}
+  .btn.danger{background:var(--bad);}
+  .btn.sm{padding:7px 10px; font-size:12px; border-radius:8px;}
+  #lock-error{color:var(--bad); font-size:12px; min-height:16px;}
+  #app-content.locked{display:none;}
+
+  header{
+    position:sticky; top:0; z-index:10; background:#0b1220ee; backdrop-filter:blur(6px);
+    padding:12px 14px; border-bottom:1px solid var(--card-b);
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+  }
+  header h1{font-size:15px; margin:0; font-weight:600; letter-spacing:.3px;}
+  header h1 span{color:var(--txt-dim); font-weight:400; font-size:12px; display:block; margin-top:2px;}
+  .hist-btn{
+    background:var(--card); color:var(--txt); border:1px solid var(--card-b);
+    padding:6px 10px; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; white-space:nowrap; text-decoration:none;
+  }
+  #conn{font-size:11px; padding:4px 9px; border-radius:20px; font-weight:600; display:flex; align-items:center; gap:5px; white-space:nowrap;}
+  #conn .dot{width:7px;height:7px;border-radius:50%;}
+  .conn-ok{background:#0f2e1c; color:var(--ok);} .conn-ok .dot{background:var(--ok);}
+  .conn-bad{background:#2e1414; color:var(--bad);} .conn-bad .dot{background:var(--bad); animation:pulse 1s infinite;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+  .tabs{display:flex; gap:6px; padding:10px 14px 0;}
+  .tab{
+    flex:1; text-align:center; padding:9px 0; border-radius:10px; font-size:13px; font-weight:600;
+    background:var(--card); color:var(--txt-dim); border:1px solid var(--card-b); cursor:pointer;
+  }
+  .tab.active{background:var(--accent); color:#fff; border-color:var(--accent);}
+
+  main{padding:12px 14px 60px; max-width:640px; margin:0 auto;}
+  .section-title{font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--txt-dim); margin:18px 2px 8px; font-weight:700;}
+  .card{background:var(--card); border:1px solid var(--card-b); border-radius:14px; padding:12px 14px;}
+  .pills{display:flex; flex-wrap:wrap; gap:6px;}
+  .pill{font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; display:inline-flex; align-items:center; gap:4px;}
+  .pill-on{background:#0f2e1c; color:var(--ok);}
+  .pill-off{background:#1a2233; color:var(--txt-dim);}
+  .pill-bad{background:#2e1414; color:var(--bad);}
+  .pill-warn{background:#332405; color:var(--warn);}
+
+  .comp{display:grid; grid-template-columns:1fr 96px; gap:8px; align-items:center; padding:8px 0; border-top:1px dashed var(--card-b);}
+  .comp:first-child{border-top:none;}
+  .comp .nome{font-size:13.5px; font-weight:600;}
+  .comp .nome small{display:block; font-size:11px; color:var(--txt-dim); font-weight:400; margin-top:2px;}
+  .comp .inp{padding:9px 10px; text-align:right; font-weight:700;}
+  .comp.mudou .inp{border-color:var(--warn);}
+  .comp.erro .inp{border-color:var(--bad);}
+  .comp.inativo .nome{color:var(--txt-dim);}
+
+  .resumo{display:flex; justify-content:space-between; align-items:center; gap:10px; margin-top:10px; padding-top:10px; border-top:1px solid var(--card-b);}
+  .soma{font-size:20px; font-weight:800;}
+  .soma.ok{color:var(--ok);} .soma.bad{color:var(--bad);}
+  .msg{font-size:12px; margin-top:8px; min-height:16px;}
+  .msg.bad{color:var(--bad);} .msg.warn{color:var(--warn);} .msg.ok{color:var(--ok);}
+  .row{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .row .btn{flex:1;}
+  select.inp{font-size:14px; padding:9px 10px;}
+  .ts{font-size:10px; color:var(--txt-dim); margin-top:8px; text-align:right;}
+
+  .modal-overlay{display:none; position:fixed; inset:0; background:rgba(0,0,0,.65); z-index:50; align-items:flex-end; justify-content:center;}
+  .modal-overlay.open{display:flex;}
+  .modal-box{background:var(--card); border:1px solid var(--card-b); border-radius:16px 16px 0 0; width:100%; max-width:640px; max-height:88vh; display:flex; flex-direction:column;}
+  @media(min-width:640px){ .modal-overlay{align-items:center;} .modal-box{border-radius:16px;} }
+  .modal-head{display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border-bottom:1px solid var(--card-b);}
+  .modal-head h2{font-size:14px; margin:0; font-weight:700;}
+  .modal-close{background:none; border:none; color:var(--txt-dim); font-size:20px; line-height:1; cursor:pointer; padding:4px;}
+  .modal-body{overflow-y:auto; padding:12px 14px 16px; font-size:13px;}
+  .tbl{width:100%; border-collapse:collapse; font-size:12.5px;}
+  .tbl th{text-align:right; color:var(--txt-dim); font-weight:600; font-size:10.5px; text-transform:uppercase; padding:6px 4px; border-bottom:1px solid var(--card-b);}
+  .tbl td{padding:6px 4px; border-bottom:1px dashed var(--card-b); text-align:right; white-space:nowrap;}
+  .tbl th:first-child,.tbl td:first-child{text-align:left; white-space:normal;}
+  .tbl tr.mudou td{color:var(--warn); font-weight:700;}
+  .aviso{border-radius:10px; padding:10px 12px; font-size:12.5px; margin-top:10px; line-height:1.4;}
+  .aviso.warn{background:#332405; color:var(--warn);}
+  .aviso.bad{background:#2e1414; color:#fca5a5;}
+  .aviso.ok{background:#0f2e1c; color:var(--ok);}
+  .aviso.info{background:#14203a; color:#93c5fd;}
+  label.chk{display:flex; gap:8px; align-items:flex-start; margin-top:10px; font-size:12.5px;}
+  label.chk input{margin-top:2px; width:18px; height:18px;}
+  .log-item{border-top:1px dashed var(--card-b); padding:7px 0; font-size:12px;}
+  .log-item:first-child{border-top:none;}
+  .log-item .t{color:var(--txt-dim); font-size:11px;}
+</style>
+</head>
+<body>
+
+<div id="lock-screen">
+  <div class="lock-icon">🧪</div>
+  <h1>Receitas — Moinhos 501 / 502</h1>
+  <p>Esta tela altera a receita direto no CLP. Informe o PIN de receitas e o seu nome.</p>
+  <form id="lock-form" autocomplete="off">
+    <input class="inp" type="text" id="lock-user" placeholder="Operador (obrigatório)" maxlength="60">
+    <input class="inp" type="password" id="lock-pin" placeholder="PIN" inputmode="numeric">
+    <button class="btn" type="submit" id="lock-btn">Entrar</button>
+    <div id="lock-error"></div>
+  </form>
+  <a class="hist-btn" href="mobile-status.html">← Voltar ao Status</a>
+</div>
+
+<div id="app-content" class="locked">
+<header>
+  <h1>Receitas<span id="hdr-user">—</span></h1>
+  <a class="hist-btn" href="mobile-status.html">← Status</a>
+  <div id="conn" class="conn-bad"><span class="dot"></span>…</div>
+</header>
+
+<div class="tabs">
+  <div class="tab active" data-linha="501">Linha 501</div>
+  <div class="tab" data-linha="502">Linha 502</div>
+</div>
+
+<main>
+  <div class="card" id="estado-card"><div class="pills" id="pills"></div><div class="ts" id="ts-leitura"></div></div>
+
+  <div class="section-title">Componentes (% em massa seca do lote)</div>
+  <div class="card">
+    <div id="comps"></div>
+    <div class="resumo">
+      <div><div style="font-size:11px;color:var(--txt-dim)">Soma</div><div class="soma" id="soma">—</div></div>
+      <div style="text-align:right"><div style="font-size:11px;color:var(--txt-dim)">Nº de componentes</div><div class="soma" id="ncomp" style="color:var(--txt)">—</div></div>
+    </div>
+    <div class="msg" id="msg-form"></div>
+    <div class="row">
+      <button class="btn sec" id="btn-desfazer">Desfazer edição</button>
+      <button class="btn sec" id="btn-recarregar">Recarregar do CLP</button>
+    </div>
+    <div class="row"><button class="btn" id="btn-revisar" disabled>Revisar alteração…</button></div>
+  </div>
+
+  <div class="section-title">Presets</div>
+  <div class="card">
+    <select class="inp" id="preset-sel"></select>
+    <div class="row">
+      <button class="btn sec sm" id="btn-preset-aplicar">Aplicar no formulário</button>
+      <button class="btn sec sm" id="btn-preset-salvar">Salvar atual…</button>
+      <button class="btn sec sm" id="btn-preset-excluir">Excluir</button>
+    </div>
+    <div class="msg" id="msg-preset"></div>
+  </div>
+
+  <div class="section-title">Últimas alterações</div>
+  <div class="card" id="log-lista"><div class="msg">—</div></div>
+</main>
+</div>
+
+<div class="modal-overlay" id="modal">
+  <div class="modal-box">
+    <div class="modal-head"><h2 id="modal-titulo"></h2><button class="modal-close" id="modal-fechar">✕</button></div>
+    <div class="modal-body" id="modal-corpo"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  'use strict';
+  var PIN = '';                       // só em memória
+  var USER_KEY = 'receitas_operador';
+  var linhaAtiva = '501';
+  var dados = null;                   // última resposta de GET /api/receitas
+  var edicao = { '501': null, '502': null }; // strings dos campos por linha
+
+  // ── utilidades ──────────────────────────────────────────────────────────
+  function $(id){ return document.getElementById(id); }
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function fmt(v){ return (Number(v) || 0).toFixed(2).replace('.', ','); }
+  // Texto do campo -> centésimos (inteiro) ou null se inválido; vazio = 0
+  function cent(txt){
+    var s = String(txt).trim().replace(',', '.');
+    if (s === '') return 0;
+    if (!/^\d{1,3}(\.\d{1,2})?$/.test(s)) return null;
+    var c = Math.round(parseFloat(s) * 100);
+    return c > 10000 ? null : c;
+  }
+  function centDe(pct){ return Math.round(Number(pct) * 100); }
+  function nomeComp(L, i){ var n = dados && dados.linhas[L].nomes[i]; return n ? n : ('Componente ' + (i + 1)); }
+
+  async function api(metodo, url, corpo){
+    var h = { 'content-type': 'application/json' };
+    if (PIN) h['x-receitas-pin'] = PIN;
+    var r;
+    try { r = await fetch(url, { method: metodo, headers: h, body: corpo ? JSON.stringify(corpo) : undefined }); }
+    catch(e){ return { status: 0, corpo: { erro: 'rede', mensagem: 'Sem conexão com o servidor.' } }; }
+    var j = {}; try { j = await r.json(); } catch(e){}
+    return { status: r.status, corpo: j };
+  }
+
+  // Erros comuns (401/403/429/503/504) — devolve texto; 401/429 voltam ao PIN
+  function textoErro(r){
+    var c = r.corpo || {};
+    if (r.status === 401 || r.status === 429){ bloquear(c.mensagem || 'PIN inválido.'); }
+    if (r.status === 0) return 'Sem conexão com o servidor.';
+    if (r.status === 503) return 'Escrita desabilitada no servidor (RECEITAS_PIN não configurado).';
+    if (r.status === 403) return 'Escrita só é permitida a partir da rede da fábrica / Tailscale.';
+    if (r.status === 429) return c.mensagem || 'Muitas tentativas de PIN — aguarde.';
+    if (r.status === 504) return (c.mensagem || 'CLP sem resposta.') + (c.executado === 'incerto' ? ' ⚠ RESULTADO INCERTO — confira no supervisório.' : '');
+    return c.mensagem || ('Erro ' + r.status);
+  }
+
+  // ── PIN ─────────────────────────────────────────────────────────────────
+  function bloquear(msg){
+    PIN = '';
+    $('lock-screen').classList.remove('hidden');
+    $('app-content').classList.add('locked');
+    fecharModal();
+    $('lock-error').textContent = msg || '';
+  }
+  $('lock-user').value = (function(){ try { return localStorage.getItem(USER_KEY) || ''; } catch(e){ return ''; } })();
+  $('lock-form').addEventListener('submit', async function(e){
+    e.preventDefault();
+    var u = $('lock-user').value.trim(), p = $('lock-pin').value;
+    if (!u){ $('lock-error').textContent = 'Informe o operador.'; return; }
+    if (!p){ $('lock-error').textContent = 'Informe o PIN.'; return; }
+    $('lock-btn').disabled = true; $('lock-error').textContent = '';
+    PIN = p;
+    var r = await api('POST', '/api/receitas/auth', {});
+    $('lock-btn').disabled = false; $('lock-pin').value = '';
+    if (r.status === 200){
+      try { localStorage.setItem(USER_KEY, u); } catch(e){}
+      $('hdr-user').textContent = 'Operador: ' + u;
+      $('lock-screen').classList.add('hidden');
+      $('app-content').classList.remove('locked');
+      carregar();
+    } else {
+      PIN = '';
+      var c = r.corpo || {};
+      $('lock-error').textContent = r.status === 401 ? ('PIN incorreto.' + (c.restantes != null ? ' Restam ' + c.restantes + ' tentativa(s).' : ''))
+        : textoErro(r);
+    }
+  });
+  function operador(){ return $('lock-user').value.trim(); }
+
+  // ── Leitura ─────────────────────────────────────────────────────────────
+  async function carregar(manterEdicao){
+    $('msg-form').className = 'msg'; $('msg-form').textContent = 'Lendo CLP…';
+    var r = await api('GET', '/api/receitas');
+    if (r.status !== 200){
+      setConn(false);
+      $('msg-form').className = 'msg bad'; $('msg-form').textContent = textoErro(r);
+      return false;
+    }
+    setConn(true);
+    dados = r.corpo;
+    ['501','502'].forEach(function(L){
+      if (!manterEdicao || !edicao[L]) edicao[L] = dados.linhas[L].pct.map(function(v){ return v ? fmt(v) : ''; });
+    });
+    $('msg-form').textContent = '';
+    render(); renderPresets(); carregarLog();
+    return true;
+  }
+  function setConn(ok){
+    $('conn').className = ok ? 'conn-ok' : 'conn-bad';
+    $('conn').innerHTML = '<span class="dot"></span>' + (ok ? 'CLP online' : 'CLP offline');
+  }
+
+  // ── Formulário ──────────────────────────────────────────────────────────
+  function analisar(L){
+    var campos = edicao[L], cs = [], erroCampo = -1;
+    for (var i = 0; i < 9; i++){ var c = cent(campos[i]); if (c === null && erroCampo < 0) erroCampo = i; cs.push(c); }
+    var r = { cs: cs, erro: '', n: 0, soma: 0, mudou: false };
+    if (erroCampo >= 0){ r.erro = 'Componente ' + (erroCampo + 1) + ': use um número de 0 a 100 com até 2 casas.'; r.campoErro = erroCampo; return r; }
+    r.soma = cs.reduce(function(a, b){ return a + b; }, 0);
+    for (i = 0; i < 9; i++) if (cs[i] > 0) r.n = i + 1;
+    for (i = 0; i < r.n; i++) if (cs[i] === 0){ r.erro = 'Componente ' + (i + 1) + ' está zerado antes do componente ' + r.n + ' — use os componentes em sequência a partir do 1.'; r.campoErro = i; break; }
+    if (!r.erro && r.soma !== 10000) r.erro = 'A soma precisa ser exatamente 100,00%.';
+    var atual = dados.linhas[L];
+    r.mudou = cs.some(function(c, k){ return c !== centDe(atual.pct[k]); }) || r.n !== Math.round(atual.n);
+    return r;
+  }
+
+  function render(){
+    if (!dados) return;
+    var L = linhaAtiva, d = dados.linhas[L];
+    var p = [];
+    p.push(d.pesando ? '<span class="pill pill-warn">⚖ Pesagem em andamento' + (d.pesandoWf005 ? ' (WF005)' : '') + (d.pesandoWf010 ? ' (WF010)' : '') + '</span>'
+                     : '<span class="pill pill-on">Sem pesagem em andamento</span>');
+    var somaOk = Math.abs(d.soma - 1) <= 1e-4;
+    p.push('<span class="pill ' + (somaOk ? 'pill-on' : 'pill-bad') + '">Soma no CLP ' + fmt(d.somaPct) + '%</span>');
+    p.push('<span class="pill pill-off">Nº comp. CLP: ' + esc(d.n) + '</span>');
+    p.push('<span class="pill pill-off">Base do lote: ' + esc(d.base) + '</span>');
+    $('pills').innerHTML = p.join('');
+    $('ts-leitura').textContent = 'Lido do CLP às ' + new Date(dados.ts).toLocaleTimeString('pt-BR');
+
+    var a = analisar(L), html = '';
+    for (var i = 0; i < 9; i++){
+      var cls = 'comp' + (a.cs[i] !== null && a.cs[i] !== centDe(d.pct[i]) ? ' mudou' : '') + (a.campoErro === i ? ' erro' : '') + (i >= a.n ? ' inativo' : '');
+      html += '<div class="' + cls + '"><div class="nome">' + (i + 1) + ' · ' + esc(nomeComp(L, i)) +
+              '<small>atual no CLP: ' + fmt(d.pct[i]) + '%</small></div>' +
+              '<input class="inp" type="text" inputmode="decimal" data-i="' + i + '" value="' + esc(edicao[L][i]) + '" placeholder="0"></div>';
+    }
+    $('comps').innerHTML = html;
+    atualizarResumo();
+  }
+
+  function atualizarResumo(){
+    var L = linhaAtiva, a = analisar(L), d = dados.linhas[L];
+    var somaTxt = a.cs.some(function(c){ return c === null; }) ? '—' : fmt(a.soma / 100) + '%';
+    $('soma').textContent = somaTxt;
+    $('soma').className = 'soma ' + (a.soma === 10000 && !a.erro ? 'ok' : 'bad');
+    $('ncomp').textContent = a.n + (a.n !== Math.round(d.n) ? '  (era ' + d.n + ')' : '');
+    $('ncomp').style.color = a.n !== Math.round(d.n) ? 'var(--warn)' : 'var(--txt)';
+    var m = $('msg-form');
+    if (a.erro){ m.className = 'msg bad'; m.textContent = a.erro; }
+    else if (!a.mudou){ m.className = 'msg'; m.textContent = 'Igual à receita atual do CLP.'; }
+    else { m.className = 'msg warn'; m.textContent = 'Alterado — revise antes de gravar.'; }
+    $('btn-revisar').disabled = !!a.erro || !a.mudou;
+    document.querySelectorAll('#comps .comp').forEach(function(el, i){
+      el.classList.toggle('mudou', a.cs[i] !== null && a.cs[i] !== centDe(d.pct[i]));
+      el.classList.toggle('erro', a.campoErro === i);
+      el.classList.toggle('inativo', i >= a.n);
+    });
+  }
+
+  $('comps').addEventListener('input', function(e){
+    var i = e.target.getAttribute('data-i'); if (i == null) return;
+    edicao[linhaAtiva][+i] = e.target.value;
+    atualizarResumo();
+  });
+  document.querySelectorAll('.tab').forEach(function(t){
+    t.addEventListener('click', function(){
+      document.querySelectorAll('.tab').forEach(function(x){ x.classList.remove('active'); });
+      t.classList.add('active'); linhaAtiva = t.getAttribute('data-linha');
+      render(); renderPresets(); carregarLog();
+    });
+  });
+  $('btn-desfazer').addEventListener('click', function(){
+    edicao[linhaAtiva] = dados.linhas[linhaAtiva].pct.map(function(v){ return v ? fmt(v) : ''; }); render();
+  });
+  $('btn-recarregar').addEventListener('click', function(){ carregar(true); });
+
+  // ── Confirmação em dois passos ──────────────────────────────────────────
+  function abrirModal(titulo, html){ $('modal-titulo').textContent = titulo; $('modal-corpo').innerHTML = html; $('modal').classList.add('open'); }
+  function fecharModal(){ $('modal').classList.remove('open'); }
+  $('modal-fechar').addEventListener('click', fecharModal);
+
+  function tabelaDiff(L, antesPct, depoisCs, rotuloDepois){
+    var h = '<table class="tbl"><thead><tr><th>Componente</th><th>Antes</th><th>' + (rotuloDepois || 'Depois') + '</th></tr></thead><tbody>';
+    for (var i = 0; i < 9; i++){
+      var a = centDe(antesPct[i]), b = depoisCs[i];
+      if (a === 0 && b === 0) continue;
+      h += '<tr class="' + (a !== b ? 'mudou' : '') + '"><td>' + (i + 1) + ' · ' + esc(nomeComp(L, i)) + '</td><td>' + fmt(a / 100) + '%</td><td>' + fmt(b / 100) + '%</td></tr>';
+    }
+    return h + '</tbody></table>';
+  }
+
+  $('btn-revisar').addEventListener('click', function(){ passo1(false); });
+
+  function passo1(forcarMarcado){
+    var L = linhaAtiva, d = dados.linhas[L], a = analisar(L);
+    if (a.erro || !a.mudou) return;
+    var nAnt = Math.round(d.n), h = tabelaDiff(L, d.pct, a.cs);
+    h += '<table class="tbl" style="margin-top:6px"><tbody><tr class="' + (a.n !== nAnt ? 'mudou' : '') + '"><td>Nº de componentes</td><td>' + nAnt + '</td><td>' + a.n + '</td></tr></tbody></table>';
+    if (a.n !== nAnt) h += '<div class="aviso warn">⚠ O <b>nº de componentes muda de ' + nAnt + ' para ' + a.n + '</b> — o CLP passa a dosar ' + a.n + ' componente(s) por lote.</div>';
+    if ((nAnt >= 4) !== (a.n >= 4)) h += '<div class="aviso warn">⚠ Nº de componentes ' + (a.n >= 4 ? 'passa a ser ≥ 4' : 'deixa de ser ≥ 4') + ': isso entra na lógica do <b>silo 4 (501DG004 e 502DG004, nas duas linhas)</b>.</div>';
+    if (d.pesando){
+      h += '<div class="aviso bad">⚖ <b>Pesagem em andamento</b> nesta linha. Os componentes ainda não dosados deste lote já usariam a nova receita (lote misturado).' +
+           (a.n !== nAnt ? ' Com mudança do nº de componentes o servidor recusa se o lote já passou do novo nº.' : '') + '</div>' +
+           '<label class="chk"><input type="checkbox" id="chk-forcar"' + (forcarMarcado ? ' checked' : '') + '> Forçar a gravação mesmo com pesagem em andamento</label>';
+    }
+    h += '<div class="aviso info">Linha <b>' + L + '</b> · Operador <b>' + esc(operador()) + '</b></div>';
+    h += '<div class="row"><button class="btn sec" id="p1-cancelar">Voltar</button><button class="btn" id="p1-continuar"' + (d.pesando && !forcarMarcado ? ' disabled' : '') + '>Continuar</button></div>';
+    abrirModal('Revisar receita — Linha ' + L, h);
+    $('p1-cancelar').onclick = fecharModal;
+    var chk = $('chk-forcar');
+    if (chk) chk.onchange = function(){ $('p1-continuar').disabled = !chk.checked; };
+    $('p1-continuar').onclick = function(){ passo2(!!(chk && chk.checked)); };
+  }
+
+  function passo2(forcar){
+    var L = linhaAtiva, a = analisar(L);
+    var h = '<div class="aviso bad" style="font-size:14px">Gravar a nova receita no CLP da <b>Linha ' + L + '</b>?' +
+            (forcar ? '<br><b>Forçando durante a pesagem.</b>' : '') + '<br>Não há desfazer automático.</div>' +
+            '<div class="row"><button class="btn sec" id="p2-voltar">Voltar</button><button class="btn danger" id="p2-gravar">Gravar no CLP</button></div>';
+    abrirModal('Confirmar gravação', h);
+    $('p2-voltar').onclick = function(){ passo1(forcar); };
+    $('p2-gravar').onclick = function(){ gravar(L, a, forcar); };
+  }
+
+  async function gravar(L, a, forcar){
+    var d = dados.linhas[L];
+    abrirModal('Gravando…', '<div class="aviso info">Enviando ao CLP e conferindo a leitura de volta… (até 25 s)</div>');
+    var r = await api('POST', '/api/receitas/' + L, {
+      usuario: operador(),
+      pct: a.cs.map(function(c){ return c / 100; }),
+      anterior: { pct: d.pct, n: d.n },
+      forcar: forcar === true,
+    });
+    var c = r.corpo || {}, h = '';
+    if (r.status === 200){
+      h = '<div class="aviso ok">✔ ' + esc(c.mensagem || 'Gravado.') + '</div>' + tabelaDiff(L, d.pct, c.lido.pct.map(centDe), 'Relido no CLP') +
+          '<div class="aviso info">Nº de componentes no CLP: <b>' + esc(c.lido.n) + '</b> · Soma calculada pelo CLP: <b>' + fmt(c.lido.somaPct) + '%</b></div>';
+      abrirModal('Receita gravada — Linha ' + L, h + '<div class="row"><button class="btn" id="res-ok">OK</button></div>');
+      $('res-ok').onclick = fecharModal;
+      edicao[L] = null; await carregar(true);
+      return;
+    }
+    if (r.status === 409 && c.erro === 'pesagem_em_andamento'){
+      if (c.atual) dados.linhas[L] = c.atual;
+      h = '<div class="aviso warn">⚖ ' + esc(c.mensagem) + '</div><div class="row"><button class="btn sec" id="res-fechar">Fechar</button><button class="btn" id="res-forcar">Revisar e forçar…</button></div>';
+      abrirModal('Pesagem em andamento', h);
+      $('res-fechar').onclick = function(){ fecharModal(); render(); };
+      $('res-forcar').onclick = function(){ render(); passo1(false); };
+      return;
+    }
+    if (r.status === 409){
+      if (c.atual){ dados.linhas[L] = c.atual; }
+      h = '<div class="aviso warn">' + esc(c.mensagem) + '</div>' + (c.atual ? '<div style="margin-top:8px;font-size:12px;color:var(--txt-dim)">Receita atual no CLP:</div>' + tabelaDiff(L, c.atual.pct, c.atual.pct.map(centDe), 'Agora') : '');
+      abrirModal(c.erro === 'conflito' ? 'Receita alterada por outra pessoa' : 'Gravação recusada', h + '<div class="row"><button class="btn" id="res-ok">Recarregar</button></div>');
+      $('res-ok').onclick = function(){ fecharModal(); carregar(true); };
+      return;
+    }
+    if (r.status === 502){
+      h = '<div class="aviso bad">✖ ' + esc(c.mensagem) + '</div>';
+      if (c.erroEscrita) h += '<div class="aviso bad">Erro de escrita: ' + esc(c.erroEscrita) + '</div>';
+      if (c.lido) h += '<div style="margin-top:8px;font-size:12px;color:var(--txt-dim)">Estado REAL lido no CLP agora:</div>' + tabelaDiff(L, d.pct, c.lido.pct.map(centDe), 'No CLP') +
+                       '<div class="aviso info">Nº de componentes: <b>' + esc(c.lido.n) + '</b> · Soma do CLP: <b>' + fmt(c.lido.somaPct) + '%</b></div>';
+      else h += '<div class="aviso bad">Não foi possível reler o CLP' + (c.erroReleitura ? ': ' + esc(c.erroReleitura) : '') + '.</div>';
+      abrirModal('Gravação não confirmada', h + '<div class="row"><button class="btn" id="res-ok">Recarregar</button></div>');
+      $('res-ok').onclick = function(){ fecharModal(); carregar(true); };
+      return;
+    }
+    var t = textoErro(r);
+    if (r.status === 401 || r.status === 429) return;
+    abrirModal('Não gravado', '<div class="aviso ' + (c.executado === 'incerto' ? 'bad' : 'warn') + '">' + esc(t) + '</div><div class="row"><button class="btn" id="res-ok">OK</button></div>');
+    $('res-ok').onclick = function(){ fecharModal(); carregar(true); };
+  }
+
+  // ── Presets ─────────────────────────────────────────────────────────────
+  function renderPresets(){
+    var lista = (dados && dados.presets && dados.presets[linhaAtiva]) || [];
+    $('preset-sel').innerHTML = lista.length
+      ? lista.map(function(p, i){ return '<option value="' + i + '">' + esc(p.nome) + ' — ' + p.pct.slice(0, p.n).map(fmt).join(' / ') + '</option>'; }).join('')
+      : '<option value="">(nenhum preset salvo nesta linha)</option>';
+    $('msg-preset').textContent = '';
+  }
+  function presetSel(){ var l = (dados.presets[linhaAtiva] || []), i = $('preset-sel').value; return i === '' ? null : l[+i]; }
+  $('btn-preset-aplicar').addEventListener('click', function(){
+    var p = presetSel(); if (!p) return;
+    edicao[linhaAtiva] = p.pct.map(function(v){ return v ? fmt(v) : ''; });
+    render();
+    $('msg-preset').className = 'msg ok'; $('msg-preset').textContent = 'Preset "' + p.nome + '" aplicado no formulário — nada foi gravado. Use "Revisar alteração".';
+  });
+  $('btn-preset-salvar').addEventListener('click', async function(){
+    var a = analisar(linhaAtiva);
+    if (a.erro){ $('msg-preset').className = 'msg bad'; $('msg-preset').textContent = 'Corrija o formulário antes de salvar: ' + a.erro; return; }
+    var nome = (prompt('Nome do preset (Linha ' + linhaAtiva + '):') || '').trim();
+    if (!nome) return;
+    var r = await api('POST', '/api/receitas/presets/' + linhaAtiva, { nome: nome, usuario: operador(), pct: a.cs.map(function(c){ return c / 100; }) });
+    if (r.status === 200){ dados.presets = r.corpo.presets; renderPresets(); $('msg-preset').className = 'msg ok'; $('msg-preset').textContent = 'Preset salvo.'; carregarLog(); }
+    else { $('msg-preset').className = 'msg bad'; $('msg-preset').textContent = textoErro(r); }
+  });
+  $('btn-preset-excluir').addEventListener('click', async function(){
+    var p = presetSel(); if (!p) return;
+    if (!confirm('Excluir o preset "' + p.nome + '" da Linha ' + linhaAtiva + '?')) return;
+    var r = await api('DELETE', '/api/receitas/presets/' + linhaAtiva + '/' + encodeURIComponent(p.nome) + '?usuario=' + encodeURIComponent(operador()));
+    if (r.status === 200){ dados.presets = r.corpo.presets; renderPresets(); $('msg-preset').className = 'msg ok'; $('msg-preset').textContent = 'Preset excluído.'; carregarLog(); }
+    else { $('msg-preset').className = 'msg bad'; $('msg-preset').textContent = textoErro(r); }
+  });
+
+  // ── Log ─────────────────────────────────────────────────────────────────
+  var ROTULO = { ok: '✔ gravado', conflito: 'conflito', pesagem_em_andamento: 'recusado (pesagem)', divergencia: '✖ divergência',
+                 falha_escrita: '✖ falha de escrita', falha_releitura: '✖ sem releitura', falha_leitura: 'falha de leitura',
+                 timeout_nao_executado: 'timeout (não executado)', clp_offline: 'CLP offline', forcar_recusado_passo: 'recusado (passo)', pin_invalido: 'PIN inválido' };
+  async function carregarLog(){
+    var r = await api('GET', '/api/receitas/log?limit=60');
+    if (r.status !== 200 || !Array.isArray(r.corpo)){ $('log-lista').innerHTML = '<div class="msg">Log indisponível.</div>'; return; }
+    var itens = r.corpo.filter(function(x){ return x.linha === linhaAtiva; }).slice(0, 15);
+    if (!itens.length){ $('log-lista').innerHTML = '<div class="msg">Nenhuma alteração registrada nesta linha.</div>'; return; }
+    $('log-lista').innerHTML = itens.map(function(x){
+      var o = x.rota === 'preset_salvar' ? 'preset salvo: ' + x.preset : x.rota === 'preset_excluir' ? 'preset excluído: ' + x.preset : (ROTULO[x.resultado] || x.resultado);
+      var det = x.antes && x.depois ? x.antes.pct.slice(0, Math.max(x.antes.n, x.depois.n)).map(fmt).join('/') + ' → ' + x.depois.pct.slice(0, Math.max(x.antes.n, x.depois.n)).map(fmt).join('/') : '';
+      return '<div class="log-item"><div class="t">' + esc(new Date(x.ts).toLocaleString('pt-BR')) + ' · ' + esc(x.usuario || '—') + (x.forcar ? ' · forçado' : '') + '</div><div><b>' + esc(o) + '</b> ' + esc(det) + '</div></div>';
+    }).join('');
+  }
+})();
+</script>
+</body>
+</html>

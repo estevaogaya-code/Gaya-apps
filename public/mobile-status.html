@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Status Equipamentos — Moagem</title>
+<!--
+  ═══════════════════════════════════════════════════════════════════════════
+  TELA MOBILE — SOMENTE LEITURA
+  ═══════════════════════════════════════════════════════════════════════════
+  Não existe NENHUM comando de escrita neste arquivo (sem liga/desliga).
+  A única ponte para escrita é o botão "Receitas" do cabeçalho, que apenas
+  ABRE outra página (mobile-receitas.html). Toda escrita no CLP fica lá,
+  protegida por PIN validado no servidor (receitas.js) — nada disso é
+  carregado ou executado por esta tela.
+  Consome o mesmo WebSocket do dashboard principal (server.js):
+    - 'snapshot'          -> valores analógicos atuais + metadados (TAGS_CONFIG)
+    - 'atualizacao'       -> atualização pontual de 1 tag analógica
+    - 'snapshot_digital'  -> status atuais + metadados (DINT_TAGS)
+    - 'digital'           -> atualização pontual de 1 status
+
+  Onde colocar este arquivo:
+    Copie para dentro da pasta `public/` do projeto do dashboard (ao lado do
+    index.html existente). Como o Express já serve `public/` via
+    express.static(), a página vai abrir em algo como:
+      http://10.0.0.222:3000/mobile-status.html
+    e o WebSocket conecta automaticamente no mesmo host:porta (não precisa
+    editar IP/porta aqui).
+
+  Tags excluídas de propósito (produção/turno — fora do escopo desta tela):
+    TON/H atual (th_*), TOTALIZADOR_* (produção/turno), kW/t (KPI).
+    Peso da calha de retorno (BM140) e peso das moegas de alimentação (WF005/
+    WF010) foram incluídos por pedido explícito — não são mais excluídos.
+    Ver EXCLUDED_ANALOG_IDS abaixo.
+
+  Equipamentos BE095 / RF040 / MX020 / MX022 / FN145 (pedido do usuário para
+  excluir): não aparecem aqui porque nunca foram adicionados ao server.js —
+  não há tag alguma referenciando esses códigos em TAGS_BASE/DINT_TAGS.
+
+  1794-IR8 (temperaturas redutores/mancais, projeto em andamento): quando o
+  L5K atualizado com os tags do IR8 for processado, os novos tags entram no
+  server.js (TAGS_BASE) e aparecem aqui automaticamente — esta tela não usa
+  uma lista fixa de equipamentos, e sim tudo que chegar via WebSocket que não
+  estiver na lista de exclusão.
+  ═══════════════════════════════════════════════════════════════════════════
+-->
+<style>
+  :root{
+    --bg:#0b1220; --card:#131c2e; --card-b:#1f2c44; --txt:#e6edf6; --txt-dim:#8493ab;
+    --ok:#22c55e; --off:#4b5568; --bad:#ef4444; --warn:#f59e0b; --accent:#3b82f6;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    -webkit-tap-highlight-color:transparent;
+  }
+  #lock-screen{
+    position:fixed; inset:0; z-index:100; background:var(--bg);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:24px; gap:14px; text-align:center;
+  }
+  #lock-screen.hidden{display:none;}
+  #lock-screen .lock-icon{font-size:34px;}
+  #lock-screen h1{font-size:16px; margin:0; font-weight:700;}
+  #lock-screen p{font-size:12px; color:var(--txt-dim); margin:0; max-width:280px;}
+  #lock-form{display:flex; flex-direction:column; gap:10px; width:100%; max-width:260px; margin-top:8px;}
+  #lock-pass{
+    background:var(--card); border:1px solid var(--card-b); color:var(--txt);
+    padding:12px 14px; border-radius:10px; font-size:16px; text-align:center; outline:none;
+  }
+  #lock-pass:focus{border-color:var(--accent);}
+  #lock-btn{
+    background:var(--accent); color:#fff; border:none; padding:12px 14px;
+    border-radius:10px; font-size:14px; font-weight:700; cursor:pointer;
+  }
+  #lock-error{color:var(--bad); font-size:12px; min-height:16px;}
+  #app-content.locked{display:none;}
+  header{
+    position:sticky; top:0; z-index:10; background:#0b1220ee; backdrop-filter:blur(6px);
+    padding:12px 14px; border-bottom:1px solid var(--card-b);
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+  }
+  header h1{font-size:15px; margin:0; font-weight:600; letter-spacing:.3px;}
+  header h1 span{color:var(--txt-dim); font-weight:400; font-size:12px; display:block; margin-top:2px;}
+  #conn{
+    font-size:11px; padding:4px 9px; border-radius:20px; font-weight:600;
+    display:flex; align-items:center; gap:5px; white-space:nowrap;
+  }
+  #conn .dot{width:7px;height:7px;border-radius:50%;}
+  .conn-ok{background:#0f2e1c; color:var(--ok);} .conn-ok .dot{background:var(--ok);}
+  .conn-bad{background:#2e1414; color:var(--bad);} .conn-bad .dot{background:var(--bad); animation:pulse 1s infinite;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+  .tabs{display:flex; gap:6px; padding:10px 14px 0;}
+  .tab{
+    flex:1; text-align:center; padding:9px 0; border-radius:10px; font-size:13px; font-weight:600;
+    background:var(--card); color:var(--txt-dim); border:1px solid var(--card-b); cursor:pointer;
+  }
+  .tab.active{background:var(--accent); color:#fff; border-color:var(--accent);}
+
+  main{padding:12px 14px 40px;}
+  .area{display:none;}
+  .area.active{display:block;}
+  .section-title{
+    font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--txt-dim);
+    margin:18px 2px 8px; font-weight:700;
+  }
+  .grid{display:grid; grid-template-columns:1fr; gap:10px;}
+  @media(min-width:640px){ .grid{grid-template-columns:1fr 1fr;} }
+
+  .card{
+    background:var(--card); border:1px solid var(--card-b); border-radius:14px; padding:12px 14px;
+  }
+  .card.stale{border-color:var(--warn); opacity:.75;}
+  .card-head{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px;}
+  .card-title{font-size:13.5px; font-weight:700;}
+  .card-code{font-size:11px; color:var(--txt-dim); font-weight:500;}
+
+  .pills{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px;}
+  .pill{
+    font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px;
+    display:inline-flex; align-items:center; gap:4px;
+  }
+  .pill .dot{width:6px;height:6px;border-radius:50%;}
+  .pill-on{background:#0f2e1c; color:var(--ok);} .pill-on .dot{background:var(--ok);}
+  .pill-off{background:#1a2233; color:var(--txt-dim);} .pill-off .dot{background:var(--off);}
+  .pill-bad{background:#2e1414; color:var(--bad);} .pill-bad .dot{background:var(--bad);}
+  .pill-warn{background:#332405; color:var(--warn);} .pill-warn .dot{background:var(--warn);}
+
+  .analogs{display:grid; grid-template-columns:1fr 1fr; gap:6px 10px; margin-top:6px;}
+  .aitem{font-size:12px; display:flex; justify-content:space-between; border-top:1px dashed var(--card-b); padding-top:5px;}
+  .aitem .lbl{color:var(--txt-dim); padding-right:6px;}
+  .aitem .val{font-weight:700; white-space:nowrap;}
+  .aitem .val.alarme-hi,.aitem .val.alarme-hihi{color:var(--bad);}
+  .aitem .val.alarme-lo{color:var(--warn);}
+
+  .empty{color:var(--txt-dim); font-size:12.5px; padding:20px 4px; text-align:center;}
+  .ts{font-size:10px; color:var(--txt-dim); margin-top:8px; text-align:right;}
+
+  .prodgrid{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:10px 0 4px;}
+  .prodtile{background:var(--card); border:1px solid var(--card-b); border-radius:10px; padding:10px 12px;}
+  .prodtile .plabel{font-size:11px; color:var(--txt-dim); text-transform:uppercase; letter-spacing:.03em;}
+  .prodtile .pval{font-size:19px; font-weight:600; margin-top:2px;}
+  .prodtile .pval small{font-size:12px; font-weight:400; color:var(--txt-dim); margin-left:2px;}
+  .prod-ts{font-size:10px; color:var(--txt-dim); text-align:right; margin-bottom:2px;}
+
+  .bolbar{display:flex; flex-wrap:wrap; gap:6px; padding:8px 14px; background:var(--card); border-bottom:1px solid var(--card-b);}
+  .bolbar select, .bolbar input{background:var(--bg); border:1px solid var(--card-b); color:var(--txt); padding:6px 8px; border-radius:8px; font-size:12px; outline:none;}
+  .bolbar input[type=number]{width:56px;}
+  .bolbar input[type=date]{flex:1 1 120px; min-width:120px;}
+  .bolbar button{background:var(--accent); color:#fff; border:none; padding:6px 12px; border-radius:8px; font-size:12px; font-weight:600; flex:1 1 100%; margin-top:2px;}
+
+  .hist-btn{
+    background:var(--card); color:var(--txt); border:1px solid var(--card-b);
+    padding:6px 10px; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; white-space:nowrap;
+  }
+  .modal-overlay{
+    display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:50;
+    align-items:flex-end; justify-content:center;
+  }
+  .modal-overlay.open{display:flex;}
+  .modal-box{
+    background:var(--card); border:1px solid var(--card-b); border-radius:16px 16px 0 0;
+    width:100%; max-width:640px; max-height:82vh; display:flex; flex-direction:column;
+  }
+  @media(min-width:640px){ .modal-overlay{align-items:center;} .modal-box{border-radius:16px; max-height:80vh;} }
+  .modal-head{
+    display:flex; align-items:center; justify-content:space-between; padding:12px 14px;
+    border-bottom:1px solid var(--card-b); flex-shrink:0;
+  }
+  .modal-head h2{font-size:14px; margin:0; font-weight:700;}
+  .modal-close{background:none; border:none; color:var(--txt-dim); font-size:20px; line-height:1; cursor:pointer; padding:4px;}
+  .modal-tabs{display:flex; gap:6px; padding:8px 14px 0; flex-shrink:0;}
+  .modal-body{overflow-y:auto; padding:10px 14px 16px;}
+  .hist-table{width:100%; border-collapse:collapse; font-size:11.5px;}
+  .hist-table th{
+    text-align:right; color:var(--txt-dim); font-weight:600; font-size:10.5px;
+    text-transform:uppercase; letter-spacing:.03em; padding:6px 4px; border-bottom:1px solid var(--card-b);
+    position:sticky; top:0; background:var(--card);
+  }
+  .hist-table th:first-child, .hist-table td:first-child{text-align:left;}
+  .hist-table td{padding:6px 4px; border-bottom:1px dashed var(--card-b); text-align:right; white-space:nowrap;}
+  .hist-table .turno-pill{font-size:10px; font-weight:700; padding:2px 6px; border-radius:10px;}
+  .turno-diurno{background:#332405; color:var(--warn);}
+  .turno-noturno{background:#14203a; color:var(--accent);}
+</style>
+</head>
+<body>
+
+<div id="lock-screen">
+  <div class="lock-icon">🔒</div>
+  <h1>Status Equipamentos</h1>
+  <p>Digite a senha de acesso pra ver os dados da moagem.</p>
+  <form id="lock-form">
+    <input type="password" id="lock-pass" placeholder="Senha" autocomplete="off">
+    <button type="submit" id="lock-btn">Entrar</button>
+    <div id="lock-error"></div>
+  </form>
+</div>
+
+<div id="app-content" class="locked">
+
+<header>
+  <h1>Status Equipamentos<span>Moagem 501 / 502 — somente leitura</span></h1>
+  <button class="hist-btn" id="hist-btn">📜 Histórico Moagem</button>
+  <a class="hist-btn" href="mobile-receitas.html" style="text-decoration:none">🧪 Receitas</a>
+  <div id="conn" class="conn-bad"><span class="dot"></span>conectando…</div>
+</header>
+
+<div class="tabs">
+  <div class="tab active" data-area="501">Linha 501</div>
+  <div class="tab" data-area="502">Linha 502</div>
+</div>
+
+<div class="bolbar">
+  <select id="bol-tipo">
+    <option value="mensal">Boletim Mensal</option>
+    <option value="diario">Boletim Diário</option>
+  </select>
+  <input type="date" id="bol-data">
+  <button id="bol-btn">📋 Exportar Boletim Moagem</button>
+</div>
+
+<div class="section-title" style="display:flex;align-items:center;justify-content:space-between;margin-top:22px">
+  <span>📦 Ensacadeira / Expedição</span>
+  <span style="display:flex;gap:6px">
+    <button class="hist-btn" id="hist-sacos-btn">📜 Histórico</button>
+  </span>
+</div>
+<div class="prodtile" style="margin:0 12px 10px"><div class="plabel">Sacos Expedidos (hoje)</div><div class="pval" id="sacos-expedidos">—</div></div>
+<div class="bolbar" style="margin:0 12px 10px">
+  <input type="date" id="bol-sacos-data">
+  <button id="bol-sacos-btn">📋 Exportar Boletim Ensacadeira</button>
+</div>
+
+<div class="modal-overlay" id="hist-modal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2>Histórico de turnos <span id="hist-count" style="color:var(--txt-dim); font-weight:400;"></span></h2>
+      <button class="modal-close" id="hist-close">✕</button>
+    </div>
+    <div class="modal-tabs">
+      <div class="tab active" data-hist-area="501">Linha 501</div>
+      <div class="tab" data-hist-area="502">Linha 502</div>
+    </div>
+    <div class="modal-body">
+      <table class="hist-table">
+        <thead>
+          <tr><th>Data</th><th>Turno</th><th>Min</th><th>Ton</th><th>kWh</th><th>t/h</th></tr>
+        </thead>
+        <tbody id="hist-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="hist-sacos-modal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2>Histórico de sacos expedidos <span id="hist-sacos-count" style="color:var(--txt-dim); font-weight:400;"></span></h2>
+      <button class="modal-close" id="hist-sacos-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <table class="hist-table">
+        <thead>
+          <tr><th>Data</th><th>Sacos Expedidos</th></tr>
+        </thead>
+        <tbody id="hist-sacos-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<main>
+  <div class="area active" data-area="501">
+    <div class="section-title">Produção do turno atual</div>
+    <div class="prod-ts" id="prod-ts-501">—</div>
+    <div class="prodgrid" id="prod-501">
+      <div class="prodtile"><div class="plabel">Tempo rodando (dia)</div><div class="pval" id="prod-501-min">—</div></div>
+      <div class="prodtile"><div class="plabel">Produção acumulada</div><div class="pval" id="prod-501-ton">—</div></div>
+      <div class="prodtile"><div class="plabel">Ton/hora</div><div class="pval" id="prod-501-tonh">—</div></div>
+      <div class="prodtile"><div class="plabel">kW/ton</div><div class="pval" id="prod-501-kwht">—</div></div>
+    </div>
+    <div class="section-title">Último turno fechado <span id="ult-501-label" style="text-transform:none;font-weight:400;color:var(--txt-dim)"></span></div>
+    <div class="prodgrid" id="ult-501">
+      <div class="prodtile"><div class="plabel">Tempo rodando</div><div class="pval" id="ult-501-min">—</div></div>
+      <div class="prodtile"><div class="plabel">Produção</div><div class="pval" id="ult-501-ton">—</div></div>
+      <div class="prodtile"><div class="plabel">Energia</div><div class="pval" id="ult-501-kwh">—</div></div>
+      <div class="prodtile"><div class="plabel">Ton/hora</div><div class="pval" id="ult-501-tonh">—</div></div>
+    </div>
+    <div class="section-title">Equipamentos</div>
+    <div class="grid" id="equip-501"></div>
+    <div class="section-title">Outras leituras da área</div>
+    <div class="grid" id="extra-501"></div>
+  </div>
+  <div class="area" data-area="502">
+    <div class="section-title">Produção do turno atual</div>
+    <div class="prod-ts" id="prod-ts-502">—</div>
+    <div class="prodgrid" id="prod-502">
+      <div class="prodtile"><div class="plabel">Tempo rodando (dia)</div><div class="pval" id="prod-502-min">—</div></div>
+      <div class="prodtile"><div class="plabel">Produção acumulada</div><div class="pval" id="prod-502-ton">—</div></div>
+      <div class="prodtile"><div class="plabel">Ton/hora</div><div class="pval" id="prod-502-tonh">—</div></div>
+      <div class="prodtile"><div class="plabel">kW/ton</div><div class="pval" id="prod-502-kwht">—</div></div>
+    </div>
+    <div class="section-title">Último turno fechado <span id="ult-502-label" style="text-transform:none;font-weight:400;color:var(--txt-dim)"></span></div>
+    <div class="prodgrid" id="ult-502">
+      <div class="prodtile"><div class="plabel">Tempo rodando</div><div class="pval" id="ult-502-min">—</div></div>
+      <div class="prodtile"><div class="plabel">Produção</div><div class="pval" id="ult-502-ton">—</div></div>
+      <div class="prodtile"><div class="plabel">Energia</div><div class="pval" id="ult-502-kwh">—</div></div>
+      <div class="prodtile"><div class="plabel">Ton/hora</div><div class="pval" id="ult-502-tonh">—</div></div>
+    </div>
+    <div class="section-title">Equipamentos</div>
+    <div class="grid" id="equip-502"></div>
+    <div class="section-title">Outras leituras da área</div>
+    <div class="grid" id="extra-502"></div>
+  </div>
+</main>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script>
+(function(){
+  'use strict';
+
+  // ── Tags fora do escopo desta tela: pesagem / produção / KPI ──────────────
+  // (todo o resto que vier do server.js é considerado "analógica de equipamento")
+  var EXCLUDED_ANALOG_IDS = new Set([
+    'totalizador_501','totalizador_502',                  // t/h médio (produção)
+    'tot501_min_dia','tot501_ton_total','tot501_prod_t2','tot501_th_t2','tot501_min_t2',
+    'tot502_min_dia','tot502_ton_total','tot502_ton_diurno','tot502_prod_t2','tot502_th_t2','tot502_min_t2',
+    'tot501_kwht_clp','tot502_kwht_clp',                  // kWh/t (KPI)
+    'th_501wf005','th_501wf010','th_502wf005','th_502wf010', // ton/h atual (pesagem)
+    'ea_501bm140_pt_u01','ea_502bm140_pt_u01',             // pressão diferencial moinho
+    'ea_501bm140_pt_u02','ea_502bm140_pt_u02',             // pressão saída moinho
+    'ea_501bm140_tt_u08','ea_502bm140_tt_u08',             // temp. entrada (gases) moinho
+    'ct_700rf001_sacos',                                    // sacos expedidos — card próprio, fora da grade 501/502
+  ]);
+
+  var ws, reconnectTimer;
+  var dintMeta = {};      // id -> tag def (DINT_TAGS)
+  var statusState = {};   // code -> { ...meta, ...valores }
+  var analogMeta = {};    // id -> tag def (TAGS_BASE, já filtrado)
+  var analogState = {};   // id -> { valor, unidade, alarme, ts }
+  var analogByCode = {};  // code -> [ids]
+  var gotDigital = false, gotAnalog = false;
+
+  function codeFromAnalogId(id){
+    var m = /^ea_(?:rede_)?(\d{3}[a-z]{2,4}\d{1,4})/i.exec(id);
+    return m ? m[1].toUpperCase() : null;
+  }
+  function codeFromDintTagName(tagName){
+    // ex: M501WF005 -> 501WF005 | M501LQ145A01 -> 501LQ145A01
+    return tagName.replace(/^M/i,'').toUpperCase();
+  }
+
+  function connect(){
+    var proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(proto + '://' + location.host);
+
+    ws.onopen = function(){
+      setConn(true);
+    };
+    ws.onclose = function(){
+      setConn(false);
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(connect, 2000);
+    };
+    ws.onerror = function(){ try{ ws.close(); }catch(e){} };
+
+    ws.onmessage = function(ev){
+      var msg;
+      try{ msg = JSON.parse(ev.data); } catch(e){ return; }
+
+      if (msg.tipo === 'snapshot_digital'){
+        (msg.tags || []).forEach(function(t){ dintMeta[t.id] = t; });
+        Object.keys(msg.dados || {}).forEach(function(id){
+          var meta = dintMeta[id]; if(!meta) return;
+          var code = codeFromDintTagName(meta.tagName);
+          statusState[code] = Object.assign({ id:id, area:meta.area, label:meta.label, isLQ:!!meta.isLQ }, msg.dados[id]);
+        });
+        gotDigital = true;
+        maybeRender();
+      }
+      else if (msg.tipo === 'digital'){
+        var meta = dintMeta[msg.id]; if(!meta) return;
+        var code = codeFromDintTagName(meta.tagName);
+        statusState[code] = Object.assign({ id:msg.id, area:meta.area, label:meta.label, isLQ:!!meta.isLQ }, msg);
+        patchStatus(code);
+      }
+      else if (msg.tipo === 'snapshot'){
+        (msg.tags || []).forEach(function(t){
+          if (EXCLUDED_ANALOG_IDS.has(t.id)) return;
+          analogMeta[t.id] = t;
+          var code = codeFromAnalogId(t.id);
+          if (code){
+            if(!analogByCode[code]) analogByCode[code] = [];
+            if (analogByCode[code].indexOf(t.id) === -1) analogByCode[code].push(t.id);
+          }
+        });
+        Object.keys(msg.dados || {}).forEach(function(id){
+          if (analogMeta[id]) analogState[id] = msg.dados[id];
+        });
+        if (msg.dados && msg.dados['tot501_min_dia']) tempoRodandoClp['501'] = msg.dados['tot501_min_dia'].valor;
+        if (msg.dados && msg.dados['tot502_min_dia']) tempoRodandoClp['502'] = msg.dados['tot502_min_dia'].valor;
+        renderTempoRodando('501');
+        renderTempoRodando('502');
+        if (msg.dados && msg.dados['ct_700rf001_sacos']) sacosExpedidos = msg.dados['ct_700rf001_sacos'].valor;
+        renderSacosExpedidos();
+        gotAnalog = true;
+        maybeRender();
+      }
+      else if (msg.tipo === 'atualizacao'){
+        if (msg.tagId === 'tot501_min_dia' || msg.tagId === 'tot502_min_dia'){
+          var linhaCLP = msg.tagId === 'tot501_min_dia' ? '501' : '502';
+          tempoRodandoClp[linhaCLP] = msg.valor;
+          renderTempoRodando(linhaCLP);
+          return;
+        }
+        if (msg.tagId === 'ct_700rf001_sacos'){
+          sacosExpedidos = msg.valor;
+          renderSacosExpedidos();
+          return;
+        }
+        if (EXCLUDED_ANALOG_IDS.has(msg.tagId) || !analogMeta[msg.tagId]) return;
+        analogState[msg.tagId] = { valor: msg.valor, qualidade: msg.qualidade, ts: msg.ts, alarme: msg.alarme };
+        patchAnalogValue(msg.tagId);
+      }
+    };
+  }
+
+  // ── Produção do turno atual (REST, poll leve — não usa WebSocket) ─────────
+  function fmtNum(v, unidade, casas){
+    if (v == null) return '—';
+    return v.toFixed(casas==null?1:casas) + '<small>' + unidade + '</small>';
+  }
+  function renderProducao(linha, dados){
+    if (!dados) return;
+    document.getElementById('prod-'+linha+'-ton').innerHTML   = fmtNum(dados.tonProduzida, ' t', 1);
+    document.getElementById('prod-'+linha+'-tonh').innerHTML  = fmtNum(dados.thMedia, ' t/h', 2);
+    var kwht = dados.kwhtClp != null ? dados.kwhtClp : (dados.kwht != null ? dados.kwht : dados.kwhtClpMedia);
+    document.getElementById('prod-'+linha+'-kwht').innerHTML  = fmtNum(kwht, ' kW/t', 2);
+  }
+  // Tempo rodando: vem direto da tag do CLP (TOTALIZADOR_501[33]/TOTALIZADOR_502[27],
+  // horímetro nativo do PLC), sem passar pelo cálculo híbrido diurno/noturno do /api/producao.
+  // Atenção: é um contador DIÁRIO (zera à meia-noite no CLP) — no turno noturno (18h-07h),
+  // logo após a virada do dia ele volta a contar do zero, então não reflete o total do
+  // turno inteiro nesse intervalo. Pra minutos exatos do turno corrente (incluindo virada
+  // de dia), o valor de dados.minRodando do /api/producao seria o correto.
+  var tempoRodandoClp = { '501': null, '502': null };
+  function renderTempoRodando(linha){
+    var v = tempoRodandoClp[linha];
+    var el = document.getElementById('prod-'+linha+'-min');
+    if (!el) return;
+    el.innerHTML = (v == null) ? '—' : Math.round(v) + '<small> min</small>';
+  }
+  var sacosExpedidos = null;
+  function renderSacosExpedidos(){
+    var el = document.getElementById('sacos-expedidos');
+    if (!el) return;
+    el.innerHTML = (sacosExpedidos == null) ? '—' : Math.round(sacosExpedidos).toLocaleString('pt-BR') + '<small> sacos</small>';
+  }
+  function fetchProducao(){
+    fetch('/api/producao').then(function(r){ return r.json(); }).then(function(data){
+      if (!data || !data.corrente) return;
+      renderProducao('501', data.corrente.linha501);
+      renderProducao('502', data.corrente.linha502);
+      var ts = fmtTs(Date.now());
+      document.getElementById('prod-ts-501').textContent = ts;
+      document.getElementById('prod-ts-502').textContent = ts;
+
+      // Último turno fechado — data.turnos[0] é sempre o mais recente já
+      // encerrado de verdade (o corrente é filtrado no backend). Só muda de
+      // valor quando o turno vira, então funciona como "sobrescreve na troca
+      // de turno" sem precisar gravar em lugar nenhum fora deste servidor.
+      var ultimo = (data.turnos && data.turnos.length) ? data.turnos[0] : null;
+      renderUltimoTurno('501', ultimo);
+      renderUltimoTurno('502', ultimo);
+
+      // Guarda o histórico completo (já veio nessa mesma resposta, ~90
+      // turnos) só na memória do navegador — o botão Histórico usa isso
+      // direto, sem nenhuma requisição nova.
+      historicoTurnos = data.turnos || [];
+      if (histModalAberto) renderHistorico();
+    }).catch(function(){ /* falha silenciosa — mantém último valor exibido */ });
+  }
+
+  function renderUltimoTurno(linha, registro){
+    var labelEl = document.getElementById('ult-'+linha+'-label');
+    var minEl   = document.getElementById('ult-'+linha+'-min');
+    var tonEl   = document.getElementById('ult-'+linha+'-ton');
+    var kwhEl   = document.getElementById('ult-'+linha+'-kwh');
+    var tonhEl  = document.getElementById('ult-'+linha+'-tonh');
+    if (!registro){
+      if (labelEl) labelEl.textContent = '';
+      if (minEl)  minEl.innerHTML  = '—';
+      if (tonEl)  tonEl.innerHTML  = '—';
+      if (kwhEl)  kwhEl.innerHTML  = '—';
+      if (tonhEl) tonhEl.innerHTML = '—';
+      return;
+    }
+    var dados = registro['linha'+linha] || {};
+    if (labelEl) labelEl.textContent = '(' + (registro.turno === 'diurno' ? 'Diurno' : 'Noturno') + ' — ' + registro.data + ')';
+    if (minEl)  minEl.innerHTML  = fmtNum(dados.minRodando, ' min', 0);
+    if (tonEl)  tonEl.innerHTML  = fmtNum(dados.tonProduzida, ' t', 1);
+    if (kwhEl)  kwhEl.innerHTML  = fmtNum(dados.kwh, ' kWh', 0);
+    if (tonhEl) tonhEl.innerHTML = fmtNum(dados.thMedia, ' t/h', 2);
+  }
+
+  // ── Boletim de Produção (PDF, diário/mensal, com OEE + malha/Blaine) ──────
+  // Mesma lógica do dashboard principal (index.html) — usa /api/boletim/:linha,
+  // que lê de producao.turnos (permanente), não de db.amostras (só 7 dias).
+  function fmtN(v, d){ if (d==null) d=1; return v!=null ? Number(v).toLocaleString('pt-BR',{maximumFractionDigits:d}) : '—'; }
+
+  // Desenha um gráfico de barras agrupadas em canvas puro (sem Chart.js — usa
+  // só os dados que já vêm do /api/boletim, então não pesa nada a mais na
+  // rede; o canvas fica na memória do navegador só o tempo de gerar o PNG).
+  function desenharGraficoBarras(categorias, series, opts){
+    opts = opts || {};
+    var w = opts.w || 500, h = opts.h || 260;
+    var canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    var ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,w,h);
+
+    var margEsq=42, margBaixo=32, margTopo=18, margDir=10;
+    var areaW = w-margEsq-margDir, areaH = h-margTopo-margBaixo;
+
+    var maxVal = 0;
+    series.forEach(function(s){ s.valores.forEach(function(v){ if(v>maxVal) maxVal=v; }); });
+    maxVal = opts.maxFixo != null ? opts.maxFixo : (maxVal*1.2 || 1);
+
+    // eixos
+    ctx.strokeStyle = '#ccc'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(margEsq, margTopo); ctx.lineTo(margEsq, h-margBaixo); ctx.lineTo(w-margDir, h-margBaixo);
+    ctx.stroke();
+
+    // grid horizontal + labels do eixo Y
+    ctx.font = '10px Arial'; ctx.textAlign = 'right';
+    for (var g=0; g<=4; g++){
+      var yv = maxVal*g/4;
+      var y = h-margBaixo - areaH*g/4;
+      ctx.fillStyle = '#888';
+      ctx.fillText(Math.round(yv), margEsq-5, y+3);
+      ctx.strokeStyle = '#eee';
+      ctx.beginPath(); ctx.moveTo(margEsq,y); ctx.lineTo(w-margDir,y); ctx.stroke();
+    }
+
+    var nCat = categorias.length, nSeries = series.length;
+    var grupoW = areaW/nCat;
+    var barW = grupoW/(nSeries+1);
+
+    categorias.forEach(function(cat,ci){
+      var xGrupo = margEsq + grupoW*ci;
+      series.forEach(function(s,si){
+        var val = s.valores[ci] || 0;
+        var barH = areaH * Math.min(val/maxVal, 1);
+        var x = xGrupo + barW*(si+0.5);
+        var y = h-margBaixo-barH;
+        ctx.fillStyle = s.cor;
+        ctx.fillRect(x, y, barW*0.82, barH);
+        ctx.fillStyle = '#333'; ctx.textAlign = 'center'; ctx.font = '9px Arial';
+        ctx.fillText(fmtN(val, opts.casas != null ? opts.casas : 0), x+barW*0.41, y-3);
+      });
+      ctx.fillStyle = '#333'; ctx.textAlign = 'center'; ctx.font = '10px Arial';
+      ctx.fillText(cat, xGrupo+grupoW/2, h-margBaixo+14);
+    });
+
+    // legenda no topo
+    if (nSeries > 1){
+      var lx = margEsq;
+      series.forEach(function(s){
+        ctx.fillStyle = s.cor; ctx.fillRect(lx, 3, 8, 8);
+        ctx.fillStyle = '#333'; ctx.textAlign = 'left'; ctx.font = '9px Arial';
+        ctx.fillText(s.nome, lx+11, 11);
+        lx += ctx.measureText(s.nome).width + 26;
+      });
+    }
+    return canvas.toDataURL('image/png');
+  }
+
+  function exportarBoletimPDF(){
+    var tipo = document.getElementById('bol-tipo').value; // 'diario' | 'mensal'
+    var nominal = 30; // capacidade nominal do equipamento (fixo — definido no server, NOMINAL_MOINHO_TH)
+    var dataStr = document.getElementById('bol-data').value || new Date().toISOString().slice(0,10);
+    var inicio, fim, periodoLabel, arquivoSufixo;
+
+    if (tipo === 'diario') {
+      inicio = new Date(dataStr+'T00:00:00').getTime();
+      fim = Math.min(inicio + 86400000, Date.now());
+      periodoLabel = new Date(dataStr+'T12:00:00').toLocaleDateString('pt-BR', { day:'2-digit', month:'long', year:'numeric' });
+      arquivoSufixo = dataStr;
+    } else {
+      var partes = dataStr.split('-'); var ano = parseInt(partes[0]); var mesNum = parseInt(partes[1]);
+      inicio = new Date(ano, mesNum-1, 1).getTime();
+      fim = Math.min(new Date(ano, mesNum, 1).getTime(), Date.now());
+      periodoLabel = new Date(ano, mesNum-1, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
+      arquivoSufixo = ano + '-' + String(mesNum).padStart(2,'0');
+    }
+
+    Promise.all([
+      fetch('/api/boletim/501?inicio='+inicio+'&fim='+fim+'&nominal='+nominal).then(function(r){return r.json();}),
+      fetch('/api/boletim/502?inicio='+inicio+'&fim='+fim+'&nominal='+nominal).then(function(r){return r.json();}),
+      tipo === 'mensal'
+        ? fetch('/api/boletim/501/dias?inicio='+inicio+'&fim='+fim).then(function(r){return r.json();}).catch(function(){return {dias:[]};})
+        : Promise.resolve({dias:[]}),
+      tipo === 'mensal'
+        ? fetch('/api/boletim/502/dias?inicio='+inicio+'&fim='+fim).then(function(r){return r.json();}).catch(function(){return {dias:[]};})
+        : Promise.resolve({dias:[]}),
+      // Produção POR PRODUTO (junta os dois moinhos, agrupado pela receita
+      // real) — complementa a visão por linha/equipamento acima delas.
+      // "T/h médio da Linha X" e "T/h médio do Produto Y" respondem
+      // perguntas diferentes (equipamento vs. receita) e podem divergir de
+      // propósito quando um moinho roda mais de um produto no período.
+      fetch('/api/producao/por-produto?inicio='+inicio+'&fim='+fim).then(function(r){return r.json();}).catch(function(){return {produtos:[]};}),
+    ]).then(function(res){
+      var r501 = res[0], r502 = res[1];
+      var dias501 = res[2].dias || [], dias502 = res[3].dias || [];
+      var porProduto = res[4].produtos || [];
+      var doc = new jspdf.jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
+
+      doc.setFontSize(16); doc.setFont(undefined,'bold');
+      doc.text('Boletim de Produção — Moagem Cimento Gaúcho', 14, 16);
+      doc.setFontSize(11); doc.setFont(undefined,'normal');
+      doc.text((tipo==='diario'?'Boletim Diário':'Boletim Mensal') + ' — ' + periodoLabel, 14, 23);
+      doc.setFontSize(9); doc.setTextColor(120);
+      doc.text('Gerado em ' + new Date().toLocaleString('pt-BR') + '  ·  T/h nominal do equipamento: ' + nominal + ' t/h', 14, 28);
+      doc.setTextColor(0);
+
+      function linhaOEE(r, nomeLinha){
+        var horasRod = r && r.periodo ? r.periodo.horasRodando : null;
+        return [
+          nomeLinha,
+          fmtN(r.tonTotal,1)+' t',
+          fmtN(r.tonHMedia,2)+' t/h',
+          fmtN(r.kwhTotal,0)+' kWh',
+          fmtN(r.kwht,2)+' kW/t',
+          horasRod!=null ? fmtN(horasRod,1)+'h' : '—',
+          r.disponibilidade!=null ? r.disponibilidade+'%' : '—',
+          r.performance!=null ? r.performance+'%' : '—',
+          r.qualidade!=null ? r.qualidade+'%' : '—',
+          r.oeeCompleto!=null ? r.oeeCompleto+'%' : (r.oee!=null ? r.oee+'% (parcial)' : '—'),
+        ];
+      }
+
+      doc.autoTable({
+        startY: 34,
+        head: [['Linha','Produção','t/h médio','Energia','kW/t','Rodando','Disponib.','Performance','Qualidade','OEE']],
+        body: [ linhaOEE(r501,'501'), linhaOEE(r502,'502') ],
+        theme:'grid',
+        headStyles:{ fillColor:[33,38,45] },
+        styles:{ fontSize:8.5, halign:'center' },
+        columnStyles:{ 0:{ halign:'left', fontStyle:'bold' } },
+        margin:{ left:14, right:14 },
+      });
+
+      var cobertura501 = r501.qualidadeDias!=null ? ('501: '+r501.qualidadeDias+'/'+(r501.qualidadeDiasPeriodo||0)+' dia(s)') : '';
+      var cobertura502 = r502.qualidadeDias!=null ? ('502: '+r502.qualidadeDias+'/'+(r502.qualidadeDiasPeriodo||0)+' dia(s)') : '';
+      doc.setFontSize(7.5); doc.setTextColor(130);
+      doc.text('Qualidade calculada a partir de malha/Blaine lançados no estoque-cimento-gaucho — cobertura: '+cobertura501+'  '+cobertura502, 14, doc.lastAutoTable.finalY + 5);
+      doc.setTextColor(0);
+
+      var cabecalhoQualidade, corpoQualidade;
+      if (tipo === 'diario') {
+        cabecalhoQualidade = [['Linha','Turno','Receita','Malha (%)','Blaine (cm²/g)']];
+        corpoQualidade = [];
+        [[r501,'501'],[r502,'502']].forEach(function(par){
+          var r = par[0], ln = par[1];
+          var det = (r.qualidadeDetalhe||[])[0];
+          if (!det) { corpoQualidade.push([ln,'—','sem lançamento no estoque-cimento-gaucho','—','—']); return; }
+          corpoQualidade.push([ln,'Diurno', det.receitaD||'—', det.dMalha!=null?fmtN(det.dMalha,2):'—', det.dBlaine!=null?Math.round(det.dBlaine):'—']);
+          corpoQualidade.push([ln,'Noturno', det.receitaN||'—', det.nMalha!=null?fmtN(det.nMalha,2):'—', det.nBlaine!=null?Math.round(det.nBlaine):'—']);
+        });
+      } else {
+        cabecalhoQualidade = [['Linha','Malha média (%)','Blaine médio (cm²/g)','Dias com medição']];
+        corpoQualidade = [
+          ['501', r501.malhaMedia!=null?fmtN(r501.malhaMedia,2):'—', r501.blaineMedia!=null?r501.blaineMedia:'—', (r501.qualidadeDias||0)+'/'+(r501.qualidadeDiasPeriodo||0)],
+          ['502', r502.malhaMedia!=null?fmtN(r502.malhaMedia,2):'—', r502.blaineMedia!=null?r502.blaineMedia:'—', (r502.qualidadeDias||0)+'/'+(r502.qualidadeDiasPeriodo||0)],
+        ];
+      }
+
+      doc.autoTable({
+        startY: doc.lastAutoTable.finalY + 10,
+        head: cabecalhoQualidade,
+        body: corpoQualidade,
+        theme:'striped',
+        headStyles:{ fillColor:[33,38,45] },
+        styles:{ fontSize:8.5, halign:'center' },
+        columnStyles:{ 0:{ halign:'left', fontStyle:'bold' }, 2:{ halign:'left' } },
+        margin:{ left:14, right:14 },
+      });
+
+      doc.setFontSize(8); doc.setTextColor(120);
+      doc.text(
+        'OEE = Disponibilidade x Performance x Qualidade (malha/Blaine do estoque-cimento-gaucho).\n' +
+        'Quando um dia do periodo nao tem malha/Blaine lancado, a coluna Qualidade usa apenas os dias\n' +
+        'com medicao (ver cobertura acima). Se nao houver nenhum dia com medicao, o OEE exibido cai\n' +
+        'para o parcial (Disponibilidade x Performance), marcado como "(parcial)".',
+        14, doc.lastAutoTable.finalY + 8
+      );
+      doc.setTextColor(0);
+
+      // ── Produção por Produto (complementa a visão por linha acima) ──────
+      // Junta os dois moinhos, agrupado pela receita real de cada
+      // meio-turno — responde "quanto rendeu cada produto" em vez de
+      // "quanto rendeu cada equipamento". As duas visões podem divergir de
+      // propósito quando um moinho roda mais de um produto no período.
+      if (tipo === 'mensal' && porProduto.length) {
+        doc.setFontSize(12); doc.setFont(undefined,'bold');
+        doc.text('Produção por Produto (501+502 juntos, por receita)', 14, doc.lastAutoTable.finalY + 16);
+        doc.setFont(undefined,'normal');
+        doc.autoTable({
+          startY: doc.lastAutoTable.finalY + 20,
+          head: [['Produto','Produção (t)','T/h Médio']],
+          body: porProduto.map(function(p){
+            return [p.produto, fmtN(p.tonTotal,1), p.thMedio!=null?fmtN(p.thMedio,2):'—'];
+          }),
+          theme:'striped',
+          headStyles:{ fillColor:[33,38,45] },
+          styles:{ fontSize:8.5, halign:'center' },
+          columnStyles:{ 0:{ halign:'left', fontStyle:'bold' } },
+          margin:{ left:14, right:14 },
+        });
+        doc.setFontSize(7.5); doc.setTextColor(130);
+        doc.text('T/h médio aqui é por RECEITA (soma dos dois moinhos) — diferente do T/h médio por LINHA da tabela acima, que é por equipamento.', 14, doc.lastAutoTable.finalY + 5);
+        doc.setTextColor(0);
+      }
+
+      // ── Detalhamento por dia (só no boletim mensal) — o total acima
+      // continua igual; isso soma o mesmo período mas abre dia a dia, cada
+      // um com seus próprios números independentes (não é acumulado).
+      if (tipo === 'mensal' && (dias501.length || dias502.length)) {
+        [[dias501,'501'],[dias502,'502']].forEach(function(par){
+          var dias = par[0], ln = par[1];
+          if (!dias.length) return;
+          doc.addPage();
+          doc.setFontSize(13); doc.setFont(undefined,'bold');
+          doc.text('Detalhamento por Dia — Linha ' + ln, 14, 16);
+          doc.setFont(undefined,'normal');
+          doc.setFontSize(9); doc.setTextColor(120);
+          doc.text('Cada linha é o total daquele dia (diurno + noturno), de forma independente.', 14, 22);
+          doc.setTextColor(0);
+
+          var corpoDias = dias.map(function(d){
+            return [d.data, fmtN(d.tonProduzida,1), d.thMedia!=null?fmtN(d.thMedia,2):'—', fmtN(d.kwh,0), Math.round(d.minRodando)];
+          });
+          var totalTon = dias.reduce(function(s,d){ return s+d.tonProduzida; }, 0);
+          var totalKwh = dias.reduce(function(s,d){ return s+d.kwh; }, 0);
+          var totalMin = dias.reduce(function(s,d){ return s+d.minRodando; }, 0);
+          corpoDias.push(['TOTAL', fmtN(totalTon,1), '—', fmtN(totalKwh,0), totalMin]);
+
+          doc.autoTable({
+            startY: 28,
+            head: [['Data','Produção (t)','T/h Médio','Energia (kWh)','Min. Rodando']],
+            body: corpoDias,
+            theme:'striped',
+            headStyles:{ fillColor:[33,38,45] },
+            styles:{ fontSize:8.5, halign:'center' },
+            columnStyles:{ 0:{ halign:'left', fontStyle:'bold' } },
+            margin:{ left:14, right:14 },
+            didParseCell: function(data){
+              if (data.row.index === corpoDias.length-1) data.cell.styles.fontStyle = 'bold';
+            },
+          });
+
+          // ── Gráficos da mesma tabela — sem requisição nova, só desenha
+          //    em cima de "dias" que já foi buscado acima. Página própria
+          //    com posição fixa, pra não depender da altura da tabela
+          //    (que varia de 28 a 31 dias) e estourar o fim da página.
+          var labelsDias = dias.map(function(d){ return d.data.split('/')[0]; }); // só o dia (DD)
+          var valoresProd = dias.map(function(d){ return d.tonProduzida; });
+          var valoresKwh  = dias.map(function(d){ return d.kwh; });
+
+          doc.addPage();
+          doc.setFontSize(13); doc.setFont(undefined,'bold');
+          doc.text('Gráfico — Linha ' + ln, 14, 16);
+          doc.setFont(undefined,'normal');
+
+          var imgProdDia = desenharGraficoBarras(labelsDias,
+            [{ nome:'Produção (t)', cor: ln==='501' ? '#3b82f6' : '#f59e0b', valores:valoresProd }],
+            { w:720, h:230, casas:1 });
+          doc.setFontSize(10); doc.text('Produção por dia (t)', 14, 26);
+          doc.addImage(imgProdDia, 'PNG', 14, 29, 182, 58);
+
+          var imgKwhDia = desenharGraficoBarras(labelsDias,
+            [{ nome:'Energia (kWh)', cor:'#10b981', valores:valoresKwh }],
+            { w:720, h:230, casas:0 });
+          doc.setFontSize(10); doc.text('Energia por dia (kWh)', 14, 94);
+          doc.addImage(imgKwhDia, 'PNG', 14, 97, 182, 58);
+        });
+      }
+
+      // ── Dashboard Visual — usa os MESMOS r501/r502 já buscados acima,
+      //    nenhuma requisição nova. Gráficos gerados em canvas e embutidos
+      //    como imagem no PDF.
+      doc.addPage();
+      doc.setFontSize(13); doc.setFont(undefined,'bold');
+      doc.text('Dashboard Visual', 14, 16);
+      doc.setFont(undefined,'normal');
+      doc.setFontSize(9); doc.setTextColor(120);
+      doc.text('Mesmos dados das tabelas acima, em gráfico.', 14, 22);
+      doc.setTextColor(0);
+
+      var imgProd = desenharGraficoBarras(['501','502'],
+        [{ nome:'Produção (t)', cor:'#3b82f6', valores:[r501.tonTotal||0, r502.tonTotal||0] }],
+        { w:480, h:220, casas:1 });
+      doc.setFontSize(10); doc.text('Produção (t)', 14, 32);
+      doc.addImage(imgProd, 'PNG', 14, 35, 88, 44);
+
+      var imgEnergia = desenharGraficoBarras(['501','502'],
+        [{ nome:'Energia (kWh)', cor:'#f59e0b', valores:[r501.kwhTotal||0, r502.kwhTotal||0] }],
+        { w:480, h:220, casas:0 });
+      doc.text('Energia (kWh)', 108, 32);
+      doc.addImage(imgEnergia, 'PNG', 108, 35, 88, 44);
+
+      var imgIndic = desenharGraficoBarras(['Disponib.','Performance','Qualidade','OEE'],
+        [
+          { nome:'501', cor:'#3b82f6', valores:[
+              r501.disponibilidade||0, r501.performance||0, r501.qualidade||0,
+              (r501.oeeCompleto!=null?r501.oeeCompleto:r501.oee)||0 ] },
+          { nome:'502', cor:'#f59e0b', valores:[
+              r502.disponibilidade||0, r502.performance||0, r502.qualidade||0,
+              (r502.oeeCompleto!=null?r502.oeeCompleto:r502.oee)||0 ] },
+        ],
+        { w:520, h:260, casas:0, maxFixo:100 });
+      doc.text('Indicadores (%)', 14, 88);
+      doc.addImage(imgIndic, 'PNG', 14, 91, 182, 91);
+
+      if (tipo === 'mensal') {
+        var imgQual = desenharGraficoBarras(['501','502'],
+          [
+            { nome:'Malha média (%)', cor:'#10b981', valores:[r501.malhaMedia||0, r502.malhaMedia||0] },
+          ],
+          { w:480, h:200, casas:2 });
+        doc.text('Malha média (%)', 14, 190);
+        doc.addImage(imgQual, 'PNG', 14, 193, 88, 40);
+
+        var imgBlaine = desenharGraficoBarras(['501','502'],
+          [
+            { nome:'Blaine médio (cm²/g)', cor:'#8b5cf6', valores:[r501.blaineMedia||0, r502.blaineMedia||0] },
+          ],
+          { w:480, h:200, casas:0 });
+        doc.text('Blaine médio (cm²/g)', 108, 190);
+        doc.addImage(imgBlaine, 'PNG', 108, 193, 88, 40);
+      }
+
+      doc.save('boletim_producao_'+tipo+'_'+arquivoSufixo+'.pdf');
+    }).catch(function(e){
+      alert('Erro ao gerar boletim: ' + e.message);
+    });
+  }
+
+  function setConn(ok){
+    var el = document.getElementById('conn');
+    el.className = ok ? 'conn-ok' : 'conn-bad';
+    el.innerHTML = '<span class="dot"></span>' + (ok ? 'conectado' : 'reconectando…');
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  function maybeRender(){
+    if (gotDigital && gotAnalog) renderAll();
+  }
+
+  function statusPills(s){
+    if (!s) return '';
+    var html = '';
+    html += s.ligado
+      ? '<span class="pill pill-bad"><span class="dot"></span>RODANDO</span>'
+      : '<span class="pill pill-on"><span class="dot"></span>PARADO</span>';
+    if (s.falha)        html += '<span class="pill pill-bad"><span class="dot"></span>FALHA</span>';
+    if (s.isLQ){
+      html += s.fluxo
+        ? '<span class="pill pill-on"><span class="dot"></span>FLUXO OK</span>'
+        : '<span class="pill pill-warn"><span class="dot"></span>SEM FLUXO</span>';
+    }
+    return html;
+  }
+
+  function analogRowsHtml(ids){
+    if (!ids || !ids.length) return '';
+    return '<div class="analogs">' + ids.map(function(id){
+      var meta = analogMeta[id]; var st = analogState[id] || {};
+      var val = (st.valor === null || st.valor === undefined) ? '—' : st.valor;
+      var alClass = st.alarme && st.alarme !== 'normal' ? ' alarme-' + st.alarme : '';
+      var label = meta.label.replace(/\s*\d{3}[A-Z]{2,4}\d{1,4}\s*/i,'').trim() || meta.label;
+      return '<div class="aitem" data-analog-id="'+id+'"><span class="lbl">'+label+'</span>' +
+             '<span class="val'+alClass+'">'+val+' '+(meta.unit||'')+'</span></div>';
+    }).join('') + '</div>';
+  }
+
+  function cardHtml(code, s, analogIds){
+    var title = s ? (s.label || code) : code;
+    return (
+      '<div class="card" data-card-code="'+code+'">' +
+        '<div class="card-head"><div class="card-title">'+title+'</div><div class="card-code">'+code+'</div></div>' +
+        (s ? '<div class="pills" data-pills>'+statusPills(s)+'</div>' : '') +
+        analogRowsHtml(analogIds) +
+        '<div class="ts" data-ts>'+ (s && s.ts ? fmtTs(s.ts) : '') +'</div>' +
+      '</div>'
+    );
+  }
+
+  function fmtTs(ts){
+    try{ return 'atualizado ' + new Date(ts).toLocaleTimeString('pt-BR'); } catch(e){ return ''; }
+  }
+
+  function renderAll(){
+    ['501','502'].forEach(function(area){
+      var codesWithStatus = Object.keys(statusState).filter(function(c){ return statusState[c].area === area; });
+      var codesAnalogOnly = Object.keys(analogByCode).filter(function(c){
+        return c.slice(0,3) === area && !statusState[c];
+      });
+
+      codesWithStatus.sort();
+      codesAnalogOnly.sort();
+
+      var equipEl = document.getElementById('equip-'+area);
+      var extraEl = document.getElementById('extra-'+area);
+
+      equipEl.innerHTML = codesWithStatus.length
+        ? codesWithStatus.map(function(c){ return cardHtml(c, statusState[c], analogByCode[c]); }).join('')
+        : '<div class="empty">Nenhum status recebido ainda.</div>';
+
+      extraEl.innerHTML = codesAnalogOnly.length
+        ? codesAnalogOnly.map(function(c){ return cardHtml(c, null, analogByCode[c]); }).join('')
+        : '<div class="empty">Sem leituras adicionais.</div>';
+    });
+  }
+
+  // ── Patches pontuais (sem re-render completo) ───────────────────────────────
+  function patchStatus(code){
+    var card = document.querySelector('[data-card-code="'+CSS.escape(code)+'"]');
+    if (!card){ renderAll(); return; } // card novo (equipamento não existia antes) -> rebuild
+    var pillsEl = card.querySelector('[data-pills]');
+    if (pillsEl) pillsEl.innerHTML = statusPills(statusState[code]);
+    var tsEl = card.querySelector('[data-ts]');
+    if (tsEl) tsEl.textContent = fmtTs(statusState[code].ts);
+  }
+
+  function patchAnalogValue(id){
+    var row = document.querySelector('[data-analog-id="'+CSS.escape(id)+'"]');
+    if (!row){ return; } // ainda não renderizado (chegará no próximo snapshot/patch de status)
+    var meta = analogMeta[id]; var st = analogState[id];
+    var alClass = st.alarme && st.alarme !== 'normal' ? ' alarme-' + st.alarme : '';
+    var valEl = row.querySelector('.val');
+    valEl.className = 'val' + alClass;
+    valEl.textContent = (st.valor === null || st.valor === undefined ? '—' : st.valor) + ' ' + (meta.unit||'');
+  }
+
+  // ── Tabs ─────────────────────────────────────────────────────────────────
+  document.querySelectorAll('.tab').forEach(function(tab){
+    tab.addEventListener('click', function(){
+      document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active'); });
+      document.querySelectorAll('.area').forEach(function(a){ a.classList.remove('active'); });
+      tab.classList.add('active');
+      document.querySelector('.area[data-area="'+tab.dataset.area+'"]').classList.add('active');
+    });
+  });
+
+  // ── Marca cards "stale" se não atualizarem em >20s (PLC/rede parado) ───────
+  setInterval(function(){
+    var now = Date.now();
+    document.querySelectorAll('[data-card-code]').forEach(function(card){
+      var code = card.getAttribute('data-card-code');
+      var s = statusState[code];
+      var stale = s && s.ts && (now - s.ts) > 20000;
+      card.classList.toggle('stale', !!stale);
+    });
+  }, 5000);
+
+  // ── Boletim: data padrão (hoje) e botão de exportar ───────────────────────
+  var bolData = document.getElementById('bol-data');
+  if (bolData && !bolData.value) bolData.value = new Date().toISOString().slice(0,10);
+  var bolBtn = document.getElementById('bol-btn');
+  if (bolBtn) bolBtn.addEventListener('click', exportarBoletimPDF);
+
+  // ── Modal de Histórico (usa dados já recebidos por fetchProducao — sem
+  //    nenhuma requisição nova; só ~90 turnos, ~53 KB, já em memória) ────────
+  var historicoTurnos = [];
+  var histModalAberto = false;
+  var histAreaAtiva = '501';
+
+  function fmtDataHora(ts){
+    try{ return new Date(ts).toLocaleDateString('pt-BR'); } catch(e){ return '—'; }
+  }
+
+  function renderHistorico(){
+    var tbody = document.getElementById('hist-tbody');
+    var countEl = document.getElementById('hist-count');
+    var linhaKey = 'linha' + histAreaAtiva;
+
+    if (!historicoTurnos.length){
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--txt-dim);padding:16px 0;">Sem dados ainda.</td></tr>';
+      if (countEl) countEl.textContent = '';
+      return;
+    }
+    if (countEl) countEl.textContent = '(' + historicoTurnos.length + ' turnos)';
+
+    tbody.innerHTML = historicoTurnos.map(function(t){
+      var d = t[linhaKey] || {};
+      var pillClass = t.turno === 'diurno' ? 'turno-diurno' : 'turno-noturno';
+      var turnoLbl = t.turno === 'diurno' ? 'Diurno' : 'Noturno';
+      return '<tr>' +
+        '<td>' + (t.data || '—') + '</td>' +
+        '<td><span class="turno-pill ' + pillClass + '">' + turnoLbl + '</span></td>' +
+        '<td>' + (d.minRodando != null ? Math.round(d.minRodando) : '—') + '</td>' +
+        '<td>' + (d.tonProduzida != null ? d.tonProduzida.toFixed(1) : '—') + '</td>' +
+        '<td>' + (d.kwh != null ? Math.round(d.kwh) : '—') + '</td>' +
+        '<td>' + (d.thMedia != null ? d.thMedia.toFixed(2) : '—') + '</td>' +
+      '</tr>';
+    }).join('');
+  }
+
+  function abrirHistorico(){
+    histModalAberto = true;
+    document.getElementById('hist-modal').classList.add('open');
+    renderHistorico();
+  }
+  function fecharHistorico(){
+    histModalAberto = false;
+    document.getElementById('hist-modal').classList.remove('open');
+  }
+
+  var histBtn = document.getElementById('hist-btn');
+  if (histBtn) histBtn.addEventListener('click', abrirHistorico);
+  var histClose = document.getElementById('hist-close');
+  if (histClose) histClose.addEventListener('click', fecharHistorico);
+  var histOverlay = document.getElementById('hist-modal');
+  if (histOverlay) histOverlay.addEventListener('click', function(e){ if (e.target === histOverlay) fecharHistorico(); });
+  document.querySelectorAll('[data-hist-area]').forEach(function(tab){
+    tab.addEventListener('click', function(){
+      document.querySelectorAll('[data-hist-area]').forEach(function(t){ t.classList.remove('active'); });
+      tab.classList.add('active');
+      histAreaAtiva = tab.getAttribute('data-hist-area');
+      renderHistorico();
+    });
+  });
+
+  // ── Modal de Histórico da Ensacadeira — separado do de turnos, busca
+  //    direto do endpoint próprio (/api/sacos/historico), independente.
+  function abrirHistoricoSacos(){
+    document.getElementById('hist-sacos-modal').classList.add('open');
+    fetch('/api/sacos/historico').then(function(r){ return r.json(); }).then(function(data){
+      var hist = (data && data.historico) || [];
+      var tbody = document.getElementById('hist-sacos-tbody');
+      var countEl = document.getElementById('hist-sacos-count');
+      if (countEl) countEl.textContent = hist.length ? '(' + hist.length + ' dias)' : '';
+      if (!hist.length){
+        tbody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:var(--txt-dim);padding:16px 0;">Sem dias fechados registrados ainda.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = hist.map(function(h){
+        return '<tr><td>'+h.data+'</td><td>'+h.total.toLocaleString('pt-BR')+'</td></tr>';
+      }).join('');
+    }).catch(function(){
+      document.getElementById('hist-sacos-tbody').innerHTML = '<tr><td colspan="2" style="text-align:center;color:var(--bad);padding:16px 0;">Erro ao buscar histórico.</td></tr>';
+    });
+  }
+  function fecharHistoricoSacos(){
+    document.getElementById('hist-sacos-modal').classList.remove('open');
+  }
+  var histSacosBtn = document.getElementById('hist-sacos-btn');
+  if (histSacosBtn) histSacosBtn.addEventListener('click', abrirHistoricoSacos);
+  var histSacosClose = document.getElementById('hist-sacos-close');
+  if (histSacosClose) histSacosClose.addEventListener('click', fecharHistoricoSacos);
+  var histSacosOverlay = document.getElementById('hist-sacos-modal');
+  if (histSacosOverlay) histSacosOverlay.addEventListener('click', function(e){ if (e.target === histSacosOverlay) fecharHistoricoSacos(); });
+
+  // ── Boletim da Ensacadeira — PDF separado do boletim dos moinhos ─────────
+  var EST_WH_POR_SACO = 65; // consumo médio estimado — NÃO é medição real, é uma aproximação
+
+  function exportarBoletimEnsacadeiraPDF(){
+    var dataStr = document.getElementById('bol-sacos-data').value || new Date().toISOString().slice(0,10);
+    var partesData = dataStr.split('-'); // 'YYYY-MM-DD'
+    var dataStrBR = partesData[2]+'/'+partesData[1]+'/'+partesData[0];
+    var periodoLabel = new Date(dataStr+'T12:00:00').toLocaleDateString('pt-BR', { day:'2-digit', month:'long', year:'numeric' });
+
+    fetch('/api/sacos/historico').then(function(r){ return r.json(); }).then(function(sacosData){
+      var hist = (sacosData && sacosData.historico) || [];
+      var doc = new jspdf.jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
+
+      doc.setFontSize(16); doc.setFont(undefined,'bold');
+      doc.text('Boletim de Expedição — Ensacadeira', 14, 16);
+      doc.setFontSize(11); doc.setFont(undefined,'normal');
+      doc.text('Referente a ' + periodoLabel, 14, 23);
+      doc.setFontSize(9); doc.setTextColor(120);
+      doc.text('Gerado em ' + new Date().toLocaleString('pt-BR'), 14, 28);
+      doc.setTextColor(0);
+
+      var diaFechado = hist.find(function(h){ return h.data === dataStrBR; });
+      var corpo, nota = '';
+      if (diaFechado) {
+        corpo = [[dataStrBR, diaFechado.total.toLocaleString('pt-BR'), fmtN(diaFechado.total*EST_WH_POR_SACO/1000,1)+' kWh*']];
+      } else if (dataStr === new Date().toISOString().slice(0,10) && sacosData.atual != null) {
+        corpo = [[dataStrBR, sacosData.atual.toLocaleString('pt-BR'), fmtN(sacosData.atual*EST_WH_POR_SACO/1000,1)+' kWh*']];
+        nota = 'Dia em andamento — contador ainda não fechou (fecha à meia-noite).';
+      } else {
+        corpo = [[dataStrBR, '—', '—']];
+        nota = 'Sem registro de fechamento para esse dia.';
+      }
+
+      doc.autoTable({
+        startY: 34,
+        head: [['Data','Sacos Expedidos','Energia Estimada*']],
+        body: corpo,
+        theme:'grid',
+        headStyles:{ fillColor:[33,38,45] },
+        styles:{ fontSize:10, halign:'center' },
+        columnStyles:{ 0:{ halign:'left', fontStyle:'bold' } },
+        margin:{ left:14, right:14 },
+      });
+
+      // Dias do MÊS da data selecionada — mesmo padrão do boletim dos
+      // moinhos: total do mês (linha TOTAL) + cada dia com seu próprio
+      // valor, de forma independente, em vez de uma janela fixa de 30 dias.
+      var anoMes = parseInt(partesData[0]), mesMes = parseInt(partesData[1]);
+      var diasDoMes = hist.filter(function(h){
+        var p = h.data.split('/'); // DD/MM/YYYY
+        return parseInt(p[1]) === mesMes && parseInt(p[2]) === anoMes;
+      }).sort(function(a,b){
+        var pa=a.data.split('/'), pb=b.data.split('/');
+        return new Date(pa[2],pa[1]-1,pa[0]) - new Date(pb[2],pb[1]-1,pb[0]);
+      });
+      if (diasDoMes.length) {
+        var nomeMes = new Date(anoMes, mesMes-1, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
+        doc.setFontSize(11); doc.setFont(undefined,'bold');
+        doc.text('Dias do mês — ' + nomeMes, 14, doc.lastAutoTable.finalY + 12);
+        doc.setFont(undefined,'normal');
+        var totalMes = diasDoMes.reduce(function(s,h){ return s+h.total; }, 0);
+        var totalEnergiaMes = totalMes*EST_WH_POR_SACO/1000;
+        var corpoHist = diasDoMes.map(function(h){
+          return [h.data, h.total.toLocaleString('pt-BR'), fmtN(h.total*EST_WH_POR_SACO/1000,1)+' kWh*'];
+        });
+        corpoHist.push(['TOTAL ('+diasDoMes.length+' dias)', totalMes.toLocaleString('pt-BR'), fmtN(totalEnergiaMes,1)+' kWh*']);
+        doc.autoTable({
+          startY: doc.lastAutoTable.finalY + 15,
+          head: [['Data','Sacos Expedidos','Energia Estimada*']],
+          body: corpoHist,
+          theme:'striped',
+          headStyles:{ fillColor:[33,38,45] },
+          styles:{ fontSize:8.5, halign:'center' },
+          columnStyles:{ 0:{ halign:'left', fontStyle:'bold' } },
+          margin:{ left:14, right:14 },
+          didParseCell: function(data){
+            if (data.row.index === corpoHist.length-1) data.cell.styles.fontStyle = 'bold';
+          },
+        });
+
+        // ── Dashboard Visual — mesmos dados já buscados, sem requisição nova
+        var diasOrdenados = diasDoMes; // já vem em ordem crescente (mais antigo → mais recente)
+        var labelsDias = diasOrdenados.map(function(h){ return h.data.split('/')[0]; }); // só o dia (DD)
+        var valoresSacos = diasOrdenados.map(function(h){ return h.total; });
+        var valoresEnergia = diasOrdenados.map(function(h){ return h.total*EST_WH_POR_SACO/1000; });
+
+        doc.addPage();
+        doc.setFontSize(13); doc.setFont(undefined,'bold');
+        doc.text('Dashboard Visual', 14, 16);
+        doc.setFont(undefined,'normal');
+        doc.setFontSize(9); doc.setTextColor(120);
+        doc.text(nomeMes + ' — ' + diasOrdenados.length + ' dias (dia do mês no eixo horizontal).', 14, 22);
+        doc.setTextColor(0);
+
+        var imgSacos = desenharGraficoBarras(labelsDias,
+          [{ nome:'Sacos Expedidos', cor:'#3b82f6', valores:valoresSacos }],
+          { w:720, h:230, casas:0 });
+        doc.setFontSize(10); doc.text('Sacos Expedidos por dia', 14, 30);
+        doc.addImage(imgSacos, 'PNG', 14, 33, 182, 58);
+
+        var imgEnergia = desenharGraficoBarras(labelsDias,
+          [{ nome:'Energia Estimada (kWh)', cor:'#f59e0b', valores:valoresEnergia }],
+          { w:720, h:230, casas:1 });
+        doc.setFontSize(10); doc.text('Energia Estimada por dia (kWh)*', 14, 98);
+        doc.addImage(imgEnergia, 'PNG', 14, 101, 182, 58);
+
+        doc.setFontSize(7.5); doc.setTextColor(130);
+        doc.text('* Energia estimada = sacos expedidos x 65 Wh/saco (consumo médio aproximado da\n' +
+                  'ensacadeira). Não é medição real de energia — é uma projeção pra referência.',
+                  14, 165);
+        doc.setTextColor(0);
+      }
+
+      if (nota) {
+        doc.setFontSize(8); doc.setTextColor(130);
+        doc.text(nota, 14, doc.lastAutoTable.finalY + 8);
+        doc.setTextColor(0);
+      }
+
+      doc.save('boletim_ensacadeira_'+dataStr+'.pdf');
+    }).catch(function(e){
+      alert('Erro ao gerar boletim da ensacadeira: ' + e.message);
+    });
+  }
+  var bolSacosBtn = document.getElementById('bol-sacos-btn');
+  if (bolSacosBtn) bolSacosBtn.addEventListener('click', exportarBoletimEnsacadeiraPDF);
+  var bolSacosData = document.getElementById('bol-sacos-data');
+  if (bolSacosData) bolSacosData.value = new Date().toISOString().slice(0,10);
+
+  function iniciarApp(){
+    connect();
+    fetchProducao();
+    setInterval(fetchProducao, 60000);
+  }
+
+  // ── Tela de bloqueio por senha ──────────────────────────────────────────
+  // Proteção só de interface (client-side) — mesmo padrão dos outros
+  // arquivos do app (index.html/entradas.html/etc). Não é autenticação de
+  // servidor de verdade, só reduz acesso casual de quem está na mesma rede
+  // Tailscale mas não deveria estar olhando essa página.
+  var ACCESS_PASS = 'mobile2026';
+  var ACCESS_KEY  = 'mobile_status_access_ok';
+
+  function liberarAcesso(){
+    document.getElementById('lock-screen').classList.add('hidden');
+    document.getElementById('app-content').classList.remove('locked');
+    iniciarApp();
+  }
+
+  if (localStorage.getItem(ACCESS_KEY) === '1'){
+    liberarAcesso();
+  } else {
+    document.getElementById('lock-form').addEventListener('submit', function(e){
+      e.preventDefault();
+      var val = document.getElementById('lock-pass').value;
+      if (val === ACCESS_PASS){
+        localStorage.setItem(ACCESS_KEY, '1');
+        liberarAcesso();
+      } else {
+        document.getElementById('lock-error').textContent = 'Senha incorreta.';
+        document.getElementById('lock-pass').value = '';
+        document.getElementById('lock-pass').focus();
+      }
+    });
+  }
+})();
+</script>
+
+</body>
+</html>

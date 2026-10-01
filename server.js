@@ -10,7 +10,8 @@ const WebSocket = require('ws');
 const cors      = require('cors');
 const path      = require('path');
 const fs        = require('fs');
-const { Controller, Tag } = require('st-ethernet-ip');
+const { Controller, Tag, TagGroup } = require('st-ethernet-ip');
+const criarReceitas = require('./receitas');
 
 const CLP_CONFIG = { ip: '10.0.0.100', slot: 0, readInterval: 3000 };
 
@@ -431,6 +432,10 @@ const server = http.createServer(app);
 const wss    = new WebSocket.Server({ server });
 app.use(cors()); app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Receitas 501/502 (leitura/escrita via fila drenada no ciclo do CLP) — ver receitas.js
+const receitas = criarReceitas({ Tag, TagGroup, dir: __dirname, getNomes: () => nomesCache });
+app.use(receitas.router);
 
 function broadcast(data) {
   const m = JSON.stringify(data);
@@ -2667,6 +2672,7 @@ async function iniciarEthernetIP() {
       function agendarProximoCiclo() {
         setTimeout(async () => {
           try {
+            await receitas.processarFila(PLC); // operações de receita, sem concorrência com a leitura
             const { ok, erros } = await lerTodosOsTags(PLC);
             // Mesma auto-cura que o server-pa2.js já tinha: se o ciclo inteiro
             // vier com 0 leituras OK, a sessão CIP morreu silenciosamente
@@ -2701,7 +2707,7 @@ async function iniciarEthernetIP() {
       let _nomesTimer;
       function agendarNomes() {
         _nomesTimer = setTimeout(async () => {
-          try { await lerNomesProdutos(PLC); } catch(e) {}
+          try { await receitas.exclusivo(() => lerNomesProdutos(PLC)); } catch(e) {}
           agendarNomes();
         }, 30000);
       }

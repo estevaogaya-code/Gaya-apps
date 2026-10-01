@@ -2756,6 +2756,18 @@ async function iniciarEthernetIP() {
 
 // SO_REUSEADDR via listen options — permite reusar porta em TIME_WAIT sem retry
 // O PM2 gerencia reinicios automaticamente; não precisamos de retry manual
+// Requisição cortada pelo próprio Node (ex.: 408 quando os cabeçalhos não
+// chegam completos em 60 s). Mesmo comportamento padrão do Node, só que
+// registrado no log para diagnóstico (ECONNRESET é ruído normal de celular).
+server.on('clientError', (err, socket) => {
+  if (err.code !== 'ECONNRESET')
+    console.warn(`[HTTP] requisição descartada (${err.code || err.message}) de ${socket.remoteAddress}`);
+  if (err.code === 'ECONNRESET' || !socket.writable) { socket.destroy(); return; }
+  const status = err.code === 'ERR_HTTP_REQUEST_TIMEOUT' ? '408 Request Timeout'
+    : err.code === 'HPE_HEADER_OVERFLOW' ? '431 Request Header Fields Too Large' : '400 Bad Request';
+  socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
+});
+
 server.on('error', err => {
   if (err.code === 'EADDRINUSE') {
     console.error('[ERRO] Porta 3000 em uso. Encerrando para o PM2 reiniciar.');

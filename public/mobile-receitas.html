@@ -228,12 +228,15 @@
   function centDe(pct){ return Math.round(Number(pct) * 100); }
   function nomeComp(L, i){ var n = dados && dados.linhas[L].nomes[i]; return n ? n : ('Componente ' + (i + 1)); }
 
+  // Espera no máximo 40 s (o servidor responde em até ~25 s); status 0 = sem resposta
   async function api(metodo, url, corpo){
     var h = { 'content-type': 'application/json' };
     if (PIN) h['x-receitas-pin'] = PIN;
-    var r;
-    try { r = await fetch(url, { method: metodo, headers: h, body: corpo ? JSON.stringify(corpo) : undefined }); }
-    catch(e){ return { status: 0, corpo: { erro: 'rede', mensagem: 'Sem conexão com o servidor.' } }; }
+    var r, ctl = window.AbortController ? new AbortController() : null;
+    var tmr = ctl ? setTimeout(function(){ ctl.abort(); }, 40000) : null;
+    try { r = await fetch(url, { method: metodo, headers: h, body: corpo ? JSON.stringify(corpo) : undefined, signal: ctl ? ctl.signal : undefined }); }
+    catch(e){ return { status: 0, corpo: { erro: 'rede', mensagem: 'Sem resposta do servidor.' } }; }
+    finally { if (tmr) clearTimeout(tmr); }
     var j = {}; try { j = await r.json(); } catch(e){}
     return { status: r.status, corpo: j };
   }
@@ -470,6 +473,24 @@
       else h += '<div class="aviso bad">Não foi possível reler o CLP' + (c.erroReleitura ? ': ' + esc(c.erroReleitura) : '') + '.</div>';
       abrirModal('Gravação não confirmada', h + '<div class="row"><button class="btn" id="res-ok">Recarregar</button></div>');
       $('res-ok').onclick = function(){ fecharModal(); carregar(true); };
+      return;
+    }
+    // Resposta que o servidor de receitas nunca dá (sem resposta, 408, 500…):
+    // não dá pra saber se gravou — relê o CLP e mostra o que está lá agora.
+    if ([400, 401, 403, 429, 503, 504].indexOf(r.status) < 0){
+      abrirModal('Resultado incerto', '<div class="aviso info">Sem resposta válida do servidor (' + (r.status ? 'HTTP ' + r.status : 'sem conexão') + '). Relendo o CLP…</div>');
+      var ok = await carregar(true), h2;
+      if (ok){
+        var agora = dados.linhas[L].pct.map(centDe);
+        var gravou = agora.every(function(v, k){ return v === a.cs[k]; });
+        var igualAntes = agora.every(function(v, k){ return v === centDe(d.pct[k]); });
+        h2 = '<div class="aviso ' + (gravou ? 'ok' : 'warn') + '">' + (gravou ? '✔ O CLP já está com a receita que você enviou.'
+             : igualAntes ? 'O CLP continua com a receita anterior — nada foi gravado. Pode tentar de novo.'
+             : '⚠ O CLP está com uma receita diferente da anterior e da enviada — confira no supervisório.') + '</div>' +
+             tabelaDiff(L, d.pct, agora, 'No CLP agora');
+      } else h2 = '<div class="aviso bad">Também não foi possível reler o CLP. Confira no supervisório antes de tentar de novo.</div>';
+      abrirModal('Resultado incerto (' + (r.status ? 'HTTP ' + r.status : 'sem resposta') + ')', h2 + '<div class="row"><button class="btn" id="res-ok">OK</button></div>');
+      $('res-ok').onclick = fecharModal;
       return;
     }
     var t = textoErro(r);

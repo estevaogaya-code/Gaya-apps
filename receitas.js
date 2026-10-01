@@ -496,7 +496,12 @@ function criarReceitas(opts) {
     res.json({ ok: true, presets });
   });
 
-  router.post('/api/receitas/:linha', ...protegido, async (req, res) => {
+  const registrarChegada = (req, res, next) => {
+    console.log(`[RECEITAS] ${req.method} ${req.path} de ${ipDe(req)}`);
+    next();
+  };
+
+  router.post('/api/receitas/:linha', registrarChegada, ...protegido, async (req, res) => {
     const L = req.params.linha;
     if (!validarLinha(L)) return res.status(400).json({ ok: false, erro: 'linha_invalida', mensagem: 'Linha deve ser 501 ou 502.' });
     const b = req.body || {};

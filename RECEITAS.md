@@ -43,6 +43,33 @@ node --test test/receitas.test.js
   Por isso o servidor recusa "forçar" quando `n` muda e `COUNTER_MR_RECEITAS_L[0].ACC > novo n`
   (ou quando não consegue ler o ACC).
 
+## Umidade e nomes (02/10/2026)
+
+- **Umidade** `VA_L_UMIDADE[1..9]` (REAL, %): editada na mesma tela e gravada **junto com a
+  receita**, no mesmo `writeTagGroup`. Faixa 0 a 30 %, até 2 casas. Entra no setpoint
+  (`pct × [10] × (1 + umidade/100)`), então segue as mesmas regras da receita: 409 se mudou no CLP,
+  bloqueio durante a pesagem (com "forçar"), releitura e conferência. A confirmação mostra o
+  setpoint antes/depois de cada componente.
+- **Nomes** `NOME_PRODUTO0i_L` (STRING): botão "Editar nomes", gravação **separada** da receita
+  (`POST /api/receitas/:linha/nomes`). Até 12 caracteres, ASCII sem acento, convertido para
+  maiúsculas (só os nomes editados). Liberado durante a pesagem: o nome não entra em lógica do ladder.
+  - Gravação membro a membro: `.DATA[0..81]` (SINT; caracteres novos e zero no resto) e `.LEN` (DINT).
+    O `st-ethernet-ip` lê STRING como estrutura crua e não grava com `Tag` simples.
+  - Releitura por `.LEN` + `.DATA[k]`; o cache de nomes do `server.js` é atualizado na hora.
+- Presets passam a guardar a umidade (presets antigos sem umidade continuam valendo; ao aplicar,
+  a umidade do formulário não muda).
+
+### Bancada — nomes e umidade (moinho parado)
+
+1. Ler: `curl -s localhost:3000/api/receitas` deve trazer `"umidade":[9,0,...]` (ou o valor
+   atual) e bater com o supervisório.
+2. Nome: renomear um componente **não usado** (ex.: o 9) para `TESTE`. Conferir no supervisório
+   e no RSLogix (`NOME_PRODUTO09_501.LEN` = 5). Voltar para vazio.
+   Se der `falha_escrita` com `CIP status`, a escrita por membro não é aceita nesse CLP: me avise.
+3. Umidade: no mesmo componente 1, umidade atual + 0,01 (ex.: 9 → 9,01). Conferir
+   `VA_501_UMIDADE[1]` e o setpoint `VA_RECEITAS_501WF005[10]` no RSLogix. Voltar ao valor anterior.
+4. Conferir as entradas em `receitas_log.jsonl`.
+
 ## Roteiro de teste de bancada (moinho parado)
 
 1. **Sem PIN:** subir o servidor sem `RECEITAS_PIN`. Conferir que o dashboard e o

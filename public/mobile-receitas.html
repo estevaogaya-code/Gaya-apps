@@ -11,7 +11,8 @@
   Escreve no CLP via server.js -> receitas.js:
     GET    /api/receitas                 leitura das duas linhas + presets
     POST   /api/receitas/auth            valida o PIN (cabeçalho x-receitas-pin)
-    POST   /api/receitas/:linha          grava pct[1..9] + nº de componentes
+    POST   /api/receitas/:linha          grava pct[1..9] + nº de componentes + umidade[1..9]
+    POST   /api/receitas/:linha/nomes    grava os nomes dos componentes (separado da receita)
     POST   /api/receitas/presets/:linha  salva preset   (PIN)
     DELETE /api/receitas/presets/:l/:n   exclui preset  (PIN)
     GET    /api/receitas/log             auditoria
@@ -92,14 +93,20 @@
   .pill-bad{background:#2e1414; color:var(--bad);}
   .pill-warn{background:#332405; color:var(--warn);}
 
-  .comp{display:grid; grid-template-columns:1fr 96px; gap:8px; align-items:center; padding:8px 0; border-top:1px dashed var(--card-b);}
-  .comp:first-child{border-top:none;}
-  .comp .nome{font-size:13.5px; font-weight:600;}
+  .comp{display:grid; grid-template-columns:1fr 78px 72px; gap:6px; align-items:center; padding:8px 0; border-top:1px dashed var(--card-b);}
+  .comp.cab{padding:0 0 4px; border-top:none; font-size:10.5px; color:var(--txt-dim); text-transform:uppercase; letter-spacing:.4px; font-weight:700;}
+  .comp.cab span{text-align:right;}
+  .comp .nome{font-size:13.5px; font-weight:600; min-width:0; overflow-wrap:anywhere;}
   .comp .nome small{display:block; font-size:11px; color:var(--txt-dim); font-weight:400; margin-top:2px;}
-  .comp .inp{padding:9px 10px; text-align:right; font-weight:700;}
-  .comp.mudou .inp{border-color:var(--warn);}
-  .comp.erro .inp{border-color:var(--bad);}
+  .comp .inp{padding:9px 8px; text-align:right; font-weight:700;}
+  .comp .inp.mudou{border-color:var(--warn);}
+  .comp .inp.erro{border-color:var(--bad);}
   .comp.inativo .nome{color:var(--txt-dim);}
+  .nomes-grid{display:grid; grid-template-columns:28px 1fr; gap:8px 8px; align-items:center;}
+  .nomes-grid .n{font-weight:700; color:var(--txt-dim); text-align:right;}
+  .nomes-grid .inp{padding:9px 10px; text-transform:uppercase;}
+  .nomes-grid .inp.mudou{border-color:var(--warn);}
+  .nomes-grid .inp.erro{border-color:var(--bad);}
 
   .resumo{display:flex; justify-content:space-between; align-items:center; gap:10px; margin-top:10px; padding-top:10px; border-top:1px solid var(--card-b);}
   .soma{font-size:20px; font-weight:800;}
@@ -166,7 +173,9 @@
 <main>
   <div class="card" id="estado-card"><div class="pills" id="pills"></div><div class="ts" id="ts-leitura"></div></div>
 
-  <div class="section-title">Componentes (% em massa seca do lote)</div>
+  <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
+    <span>Componentes</span><button class="hist-btn" id="btn-nomes">✏️ Editar nomes</button>
+  </div>
   <div class="card">
     <div id="comps"></div>
     <div class="resumo">
@@ -211,7 +220,8 @@
   var USER_KEY = 'receitas_operador';
   var linhaAtiva = '501';
   var dados = null;                   // última resposta de GET /api/receitas
-  var edicao = { '501': null, '502': null }; // strings dos campos por linha
+  var edicao = { '501': null, '502': null }; // { pct:[9], um:[9] } — texto dos campos por linha
+  var UMID_MAX = 30, NOME_MAX = 12;
 
   // ── utilidades ──────────────────────────────────────────────────────────
   function $(id){ return document.getElementById(id); }
@@ -226,6 +236,19 @@
     return c > 10000 ? null : c;
   }
   function centDe(pct){ return Math.round(Number(pct) * 100); }
+  // Umidade: 0 a UMID_MAX com até 2 casas; vazio = 0
+  function centU(txt){
+    var s = String(txt).trim().replace(',', '.');
+    if (s === '') return 0;
+    if (!/^\d{1,2}(\.\d{1,2})?$/.test(s)) return null;
+    var c = Math.round(parseFloat(s) * 100);
+    return c > UMID_MAX * 100 ? null : c;
+  }
+  function umidDe(d){ return (d.umidade && d.umidade.length === 9) ? d.umidade : [0,0,0,0,0,0,0,0,0]; }
+  function camposDe(d){
+    return { pct: d.pct.map(function(v){ return v ? fmt(v) : ''; }),
+             um:  umidDe(d).map(function(v){ return v ? fmt(v) : ''; }) };
+  }
   function nomeComp(L, i){ var n = dados && dados.linhas[L].nomes[i]; return n ? n : ('Componente ' + (i + 1)); }
 
   // Espera no máximo 40 s (o servidor responde em até ~25 s); status 0 = sem resposta
@@ -298,7 +321,7 @@
     setConn(true);
     dados = r.corpo;
     ['501','502'].forEach(function(L){
-      if (!manterEdicao || !edicao[L]) edicao[L] = dados.linhas[L].pct.map(function(v){ return v ? fmt(v) : ''; });
+      if (!manterEdicao || !edicao[L]) edicao[L] = camposDe(dados.linhas[L]);
     });
     $('msg-form').textContent = '';
     render(); renderPresets(); carregarLog();
@@ -311,16 +334,22 @@
 
   // ── Formulário ──────────────────────────────────────────────────────────
   function analisar(L){
-    var campos = edicao[L], cs = [], erroCampo = -1;
-    for (var i = 0; i < 9; i++){ var c = cent(campos[i]); if (c === null && erroCampo < 0) erroCampo = i; cs.push(c); }
-    var r = { cs: cs, erro: '', n: 0, soma: 0, mudou: false };
+    var campos = edicao[L], cs = [], ucs = [], erroCampo = -1, erroU = -1;
+    for (var i = 0; i < 9; i++){
+      var c = cent(campos.pct[i]); if (c === null && erroCampo < 0) erroCampo = i; cs.push(c);
+      var u = centU(campos.um[i]); if (u === null && erroU < 0) erroU = i; ucs.push(u);
+    }
+    var r = { cs: cs, ucs: ucs, erro: '', n: 0, soma: 0, mudou: false, campoErro: -1, umErro: erroU };
     if (erroCampo >= 0){ r.erro = 'Componente ' + (erroCampo + 1) + ': use um número de 0 a 100 com até 2 casas.'; r.campoErro = erroCampo; return r; }
+    if (erroU >= 0){ r.erro = 'Umidade do componente ' + (erroU + 1) + ': use um número de 0 a ' + UMID_MAX + ' com até 2 casas.'; return r; }
     r.soma = cs.reduce(function(a, b){ return a + b; }, 0);
     for (i = 0; i < 9; i++) if (cs[i] > 0) r.n = i + 1;
     for (i = 0; i < r.n; i++) if (cs[i] === 0){ r.erro = 'Componente ' + (i + 1) + ' está zerado antes do componente ' + r.n + ' — use os componentes em sequência a partir do 1.'; r.campoErro = i; break; }
     if (!r.erro && r.soma !== 10000) r.erro = 'A soma precisa ser exatamente 100,00%.';
     var atual = dados.linhas[L];
-    r.mudou = cs.some(function(c, k){ return c !== centDe(atual.pct[k]); }) || r.n !== Math.round(atual.n);
+    var umAtual = umidDe(atual);
+    r.umMudou = ucs.some(function(u, k){ return u !== centDe(umAtual[k]); });
+    r.mudou = cs.some(function(c, k){ return c !== centDe(atual.pct[k]); }) || r.n !== Math.round(atual.n) || r.umMudou;
     return r;
   }
 
@@ -337,12 +366,12 @@
     $('pills').innerHTML = p.join('');
     $('ts-leitura').textContent = 'Lido do CLP às ' + new Date(dados.ts).toLocaleTimeString('pt-BR');
 
-    var a = analisar(L), html = '';
+    var html = '<div class="comp cab"><div>Componente</div><span>%</span><span>Umid. %</span></div>', um = umidDe(d);
     for (var i = 0; i < 9; i++){
-      var cls = 'comp' + (a.cs[i] !== null && a.cs[i] !== centDe(d.pct[i]) ? ' mudou' : '') + (a.campoErro === i ? ' erro' : '') + (i >= a.n ? ' inativo' : '');
-      html += '<div class="' + cls + '"><div class="nome">' + (i + 1) + ' · ' + esc(nomeComp(L, i)) +
-              '<small>atual no CLP: ' + fmt(d.pct[i]) + '%</small></div>' +
-              '<input class="inp" type="text" inputmode="decimal" data-i="' + i + '" value="' + esc(edicao[L][i]) + '" placeholder="0"></div>';
+      html += '<div class="comp"><div class="nome">' + (i + 1) + ' · ' + esc(nomeComp(L, i)) +
+              '<small>CLP: ' + fmt(d.pct[i]) + '% · umid. ' + fmt(um[i]) + '%</small></div>' +
+              '<input class="inp" type="text" inputmode="decimal" data-i="' + i + '" data-campo="pct" value="' + esc(edicao[L].pct[i]) + '" placeholder="0">' +
+              '<input class="inp" type="text" inputmode="decimal" data-i="' + i + '" data-campo="um" value="' + esc(edicao[L].um[i]) + '" placeholder="0"></div>';
     }
     $('comps').innerHTML = html;
     atualizarResumo();
@@ -360,16 +389,21 @@
     else if (!a.mudou){ m.className = 'msg'; m.textContent = 'Igual à receita atual do CLP.'; }
     else { m.className = 'msg warn'; m.textContent = 'Alterado — revise antes de gravar.'; }
     $('btn-revisar').disabled = !!a.erro || !a.mudou;
-    document.querySelectorAll('#comps .comp').forEach(function(el, i){
-      el.classList.toggle('mudou', a.cs[i] !== null && a.cs[i] !== centDe(d.pct[i]));
-      el.classList.toggle('erro', a.campoErro === i);
+    var um = umidDe(d);
+    document.querySelectorAll('#comps .comp:not(.cab)').forEach(function(el, i){
+      var ip = el.querySelector('[data-campo="pct"]'), iu = el.querySelector('[data-campo="um"]');
+      var cp = cent(edicao[L].pct[i]), cu = centU(edicao[L].um[i]);
+      ip.classList.toggle('mudou', cp !== null && cp !== centDe(d.pct[i]));
+      ip.classList.toggle('erro', cp === null || a.campoErro === i);
+      iu.classList.toggle('mudou', cu !== null && cu !== centDe(um[i]));
+      iu.classList.toggle('erro', cu === null);
       el.classList.toggle('inativo', i >= a.n);
     });
   }
 
   $('comps').addEventListener('input', function(e){
-    var i = e.target.getAttribute('data-i'); if (i == null) return;
-    edicao[linhaAtiva][+i] = e.target.value;
+    var i = e.target.getAttribute('data-i'), campo = e.target.getAttribute('data-campo'); if (i == null || !campo) return;
+    edicao[linhaAtiva][campo][+i] = e.target.value;
     atualizarResumo();
   });
   document.querySelectorAll('.tab').forEach(function(t){
@@ -380,23 +414,39 @@
     });
   });
   $('btn-desfazer').addEventListener('click', function(){
-    edicao[linhaAtiva] = dados.linhas[linhaAtiva].pct.map(function(v){ return v ? fmt(v) : ''; }); render();
+    edicao[linhaAtiva] = camposDe(dados.linhas[linhaAtiva]); render();
   });
   $('btn-recarregar').addEventListener('click', function(){ carregar(true); });
 
   // ── Confirmação em dois passos ──────────────────────────────────────────
-  function abrirModal(titulo, html){ $('modal-titulo').textContent = titulo; $('modal-corpo').innerHTML = html; $('modal').classList.add('open'); }
+  function abrirModal(titulo, html){ $('modal-titulo').textContent = titulo; $('modal-corpo').oninput = null; $('modal-corpo').innerHTML = html; $('modal').classList.add('open'); }
   function fecharModal(){ $('modal').classList.remove('open'); }
   $('modal-fechar').addEventListener('click', fecharModal);
 
-  function tabelaDiff(L, antesPct, depoisCs, rotuloDepois){
-    var h = '<table class="tbl"><thead><tr><th>Componente</th><th>Antes</th><th>' + (rotuloDepois || 'Depois') + '</th></tr></thead><tbody>';
+  // antes/depois em centésimos; esconde linhas zeradas nos dois lados
+  function tabela(L, titulo, antesC, depoisC, rotuloDepois){
+    var h = '<table class="tbl" style="margin-top:6px"><thead><tr><th>' + titulo + '</th><th>Antes</th><th>' + (rotuloDepois || 'Depois') + '</th></tr></thead><tbody>', linhas = 0;
     for (var i = 0; i < 9; i++){
-      var a = centDe(antesPct[i]), b = depoisCs[i];
+      var a = antesC[i], b = depoisC[i];
       if (a === 0 && b === 0) continue;
+      linhas++;
       h += '<tr class="' + (a !== b ? 'mudou' : '') + '"><td>' + (i + 1) + ' · ' + esc(nomeComp(L, i)) + '</td><td>' + fmt(a / 100) + '%</td><td>' + fmt(b / 100) + '%</td></tr>';
     }
-    return h + '</tbody></table>';
+    return linhas ? h + '</tbody></table>' : '';
+  }
+  function tabelaDiff(L, antesPct, depoisCs, rotuloDepois){ return tabela(L, 'Componente', antesPct.map(centDe), depoisCs, rotuloDepois); }
+  function tabelaUmid(L, antesUm, depoisUcs, rotuloDepois){ return tabela(L, 'Umidade', antesUm.map(centDe), depoisUcs, rotuloDepois); }
+  // Setpoint calculado pelo CLP: pct × base × (1 + umidade/100), na unidade da balança
+  function tabelaSetpoint(L, d, a){
+    var base = Number(d.base) || 0, um = umidDe(d), h = '', linhas = 0;
+    h += '<table class="tbl" style="margin-top:6px"><thead><tr><th>Setpoint</th><th>Antes</th><th>Depois</th></tr></thead><tbody>';
+    for (var i = 0; i < 9; i++){
+      var sa = d.pct[i] / 100 * base * (1 + um[i] / 100), sd = a.cs[i] / 10000 * base * (1 + a.ucs[i] / 10000);
+      if (!sa && !sd) continue;
+      linhas++;
+      h += '<tr class="' + (Math.round(sa) !== Math.round(sd) ? 'mudou' : '') + '"><td>' + (i + 1) + ' · ' + esc(nomeComp(L, i)) + '</td><td>' + Math.round(sa).toLocaleString('pt-BR') + '</td><td>' + Math.round(sd).toLocaleString('pt-BR') + '</td></tr>';
+    }
+    return linhas ? h + '</tbody></table><div style="font-size:11px;color:var(--txt-dim);margin-top:4px">Setpoint = % × base (' + esc(base) + ') × (1 + umidade/100), na unidade da balança.</div>' : '';
   }
 
   $('btn-revisar').addEventListener('click', function(){ passo1(false); });
@@ -405,6 +455,8 @@
     var L = linhaAtiva, d = dados.linhas[L], a = analisar(L);
     if (a.erro || !a.mudou) return;
     var nAnt = Math.round(d.n), h = tabelaDiff(L, d.pct, a.cs);
+    if (a.umMudou) h += tabelaUmid(L, umidDe(d), a.ucs);
+    h += tabelaSetpoint(L, d, a);
     h += '<table class="tbl" style="margin-top:6px"><tbody><tr class="' + (a.n !== nAnt ? 'mudou' : '') + '"><td>Nº de componentes</td><td>' + nAnt + '</td><td>' + a.n + '</td></tr></tbody></table>';
     if (a.n !== nAnt) h += '<div class="aviso warn">⚠ O <b>nº de componentes muda de ' + nAnt + ' para ' + a.n + '</b> — o CLP passa a dosar ' + a.n + ' componente(s) por lote.</div>';
     if ((nAnt >= 4) !== (a.n >= 4)) h += '<div class="aviso warn">⚠ Nº de componentes ' + (a.n >= 4 ? 'passa a ser ≥ 4' : 'deixa de ser ≥ 4') + ': isso entra na lógica do <b>silo 4 (501DG004 e 502DG004, nas duas linhas)</b>.</div>';
@@ -438,12 +490,14 @@
     var r = await api('POST', '/api/receitas/' + L, {
       usuario: operador(),
       pct: a.cs.map(function(c){ return c / 100; }),
-      anterior: { pct: d.pct, n: d.n },
+      umidade: a.ucs.map(function(c){ return c / 100; }),
+      anterior: { pct: d.pct, n: d.n, umidade: umidDe(d) },
       forcar: forcar === true,
     });
     var c = r.corpo || {}, h = '';
     if (r.status === 200){
       h = '<div class="aviso ok">✔ ' + esc(c.mensagem || 'Gravado.') + '</div>' + tabelaDiff(L, d.pct, c.lido.pct.map(centDe), 'Relido no CLP') +
+          (a.umMudou ? tabelaUmid(L, umidDe(d), umidDe(c.lido).map(centDe), 'Relido no CLP') : '') +
           '<div class="aviso info">Nº de componentes no CLP: <b>' + esc(c.lido.n) + '</b> · Soma calculada pelo CLP: <b>' + fmt(c.lido.somaPct) + '%</b></div>';
       abrirModal('Receita gravada — Linha ' + L, h + '<div class="row"><button class="btn" id="res-ok">OK</button></div>');
       $('res-ok').onclick = fecharModal;
@@ -469,6 +523,7 @@
       h = '<div class="aviso bad">✖ ' + esc(c.mensagem) + '</div>';
       if (c.erroEscrita) h += '<div class="aviso bad">Erro de escrita: ' + esc(c.erroEscrita) + '</div>';
       if (c.lido) h += '<div style="margin-top:8px;font-size:12px;color:var(--txt-dim)">Estado REAL lido no CLP agora:</div>' + tabelaDiff(L, d.pct, c.lido.pct.map(centDe), 'No CLP') +
+                       tabelaUmid(L, umidDe(d), umidDe(c.lido).map(centDe), 'No CLP') +
                        '<div class="aviso info">Nº de componentes: <b>' + esc(c.lido.n) + '</b> · Soma do CLP: <b>' + fmt(c.lido.somaPct) + '%</b></div>';
       else h += '<div class="aviso bad">Não foi possível reler o CLP' + (c.erroReleitura ? ': ' + esc(c.erroReleitura) : '') + '.</div>';
       abrirModal('Gravação não confirmada', h + '<div class="row"><button class="btn" id="res-ok">Recarregar</button></div>');
@@ -481,13 +536,13 @@
       abrirModal('Resultado incerto', '<div class="aviso info">Sem resposta válida do servidor (' + (r.status ? 'HTTP ' + r.status : 'sem conexão') + '). Relendo o CLP…</div>');
       var ok = await carregar(true), h2;
       if (ok){
-        var agora = dados.linhas[L].pct.map(centDe);
-        var gravou = agora.every(function(v, k){ return v === a.cs[k]; });
-        var igualAntes = agora.every(function(v, k){ return v === centDe(d.pct[k]); });
+        var agora = dados.linhas[L].pct.map(centDe), umAgora = umidDe(dados.linhas[L]).map(centDe), umAntes = umidDe(d).map(centDe);
+        var gravou = agora.every(function(v, k){ return v === a.cs[k]; }) && umAgora.every(function(v, k){ return v === a.ucs[k]; });
+        var igualAntes = agora.every(function(v, k){ return v === centDe(d.pct[k]); }) && umAgora.every(function(v, k){ return v === umAntes[k]; });
         h2 = '<div class="aviso ' + (gravou ? 'ok' : 'warn') + '">' + (gravou ? '✔ O CLP já está com a receita que você enviou.'
              : igualAntes ? 'O CLP continua com a receita anterior — nada foi gravado. Pode tentar de novo.'
              : '⚠ O CLP está com uma receita diferente da anterior e da enviada — confira no supervisório.') + '</div>' +
-             tabelaDiff(L, d.pct, agora, 'No CLP agora');
+             tabelaDiff(L, d.pct, agora, 'No CLP agora') + tabelaUmid(L, umidDe(d), umAgora, 'No CLP agora');
       } else h2 = '<div class="aviso bad">Também não foi possível reler o CLP. Confira no supervisório antes de tentar de novo.</div>';
       abrirModal('Resultado incerto (' + (r.status ? 'HTTP ' + r.status : 'sem resposta') + ')', h2 + '<div class="row"><button class="btn" id="res-ok">OK</button></div>');
       $('res-ok').onclick = fecharModal;
@@ -499,18 +554,91 @@
     $('res-ok').onclick = function(){ fecharModal(); carregar(true); };
   }
 
+  // ── Nomes dos componentes ───────────────────────────────────────────────
+  // Gravação separada da receita; nome não entra em lógica do CLP.
+  function nomesAtuais(L){ var n = (dados.linhas[L].nomes || []).slice(0, 9); while (n.length < 9) n.push(''); return n.map(function(x){ return String(x || '').trim(); }); }
+  function validarNome(t){ return t.length <= NOME_MAX && /^[\x20-\x7E]*$/.test(t); }
+
+  function abrirNomes(valores){
+    var L = linhaAtiva, atuais = nomesAtuais(L), v = valores || atuais.slice(), h = '<div class="nomes-grid">';
+    for (var i = 0; i < 9; i++)
+      h += '<div class="n">' + (i + 1) + '</div><input class="inp" type="text" maxlength="' + NOME_MAX + '" autocapitalize="characters" data-n="' + i + '" value="' + esc(v[i]) + '" placeholder="(sem nome)">';
+    h += '</div><div class="msg" id="msg-nomes"></div>' +
+         '<div style="font-size:11px;color:var(--txt-dim);margin-top:6px">Até ' + NOME_MAX + ' caracteres, sem acento. O nome só aparece nas telas — não muda a dosagem.</div>' +
+         '<div class="row"><button class="btn sec" id="nm-cancelar">Cancelar</button><button class="btn" id="nm-revisar" disabled>Revisar…</button></div>';
+    abrirModal('Nomes dos componentes — Linha ' + L, h);
+    function ler(){ return Array.prototype.map.call(document.querySelectorAll('[data-n]'), function(el){ return el.value; }); }
+    function checar(){
+      var vals = ler(), erro = '', mudou = false;
+      document.querySelectorAll('[data-n]').forEach(function(el, i){
+        var t = vals[i].trim(), mexeu = t !== atuais[i], tn = mexeu ? t.toUpperCase() : t, ok = !mexeu || validarNome(tn);
+        el.classList.toggle('mudou', mexeu); el.classList.toggle('erro', !ok);
+        if (mexeu) mudou = true;
+        if (!ok && !erro) erro = 'Componente ' + (i + 1) + ': até ' + NOME_MAX + ' caracteres, sem acento.';
+      });
+      $('msg-nomes').className = 'msg ' + (erro ? 'bad' : mudou ? 'warn' : '');
+      $('msg-nomes').textContent = erro || (mudou ? 'Alterado — revise antes de gravar.' : 'Igual aos nomes atuais do CLP.');
+      $('nm-revisar').disabled = !!erro || !mudou;
+    }
+    $('modal-corpo').oninput = function(e){ if (e.target.hasAttribute('data-n')) checar(); };
+    $('nm-cancelar').onclick = fecharModal;
+    $('nm-revisar').onclick = function(){ revisarNomes(ler().map(function(x, i){ var t = x.trim(); return t === atuais[i] ? t : t.toUpperCase(); })); };
+    checar();
+  }
+
+  function revisarNomes(novos){
+    var L = linhaAtiva, atuais = nomesAtuais(L), h = '<table class="tbl"><thead><tr><th>#</th><th>Antes</th><th>Depois</th></tr></thead><tbody>';
+    for (var i = 0; i < 9; i++) if (novos[i] !== atuais[i])
+      h += '<tr class="mudou"><td>' + (i + 1) + '</td><td>' + esc(atuais[i] || '—') + '</td><td>' + esc(novos[i] || '—') + '</td></tr>';
+    h += '</tbody></table><div class="aviso info">Linha <b>' + L + '</b> · Operador <b>' + esc(operador()) + '</b></div>' +
+         '<div class="row"><button class="btn sec" id="nm-voltar">Voltar</button><button class="btn danger" id="nm-gravar">Gravar nomes no CLP</button></div>';
+    abrirModal('Confirmar nomes — Linha ' + L, h);
+    $('nm-voltar').onclick = function(){ abrirNomes(novos); };
+    $('nm-gravar').onclick = function(){ gravarNomes(L, novos, atuais); };
+  }
+
+  async function gravarNomes(L, novos, atuais){
+    abrirModal('Gravando nomes…', '<div class="aviso info">Enviando ao CLP e conferindo a leitura de volta…</div>');
+    var r = await api('POST', '/api/receitas/' + L + '/nomes', { usuario: operador(), nomes: novos, anterior: atuais });
+    var c = r.corpo || {}, ok = '<div class="row"><button class="btn" id="res-ok">OK</button></div>';
+    if (r.status === 200){
+      dados.linhas[L].nomes = c.nomes; render(); carregarLog();
+      abrirModal('Nomes gravados — Linha ' + L, '<div class="aviso ok">✔ ' + esc(c.mensagem) + '</div>' + ok);
+      $('res-ok').onclick = fecharModal; return;
+    }
+    if (r.status === 409 || r.status === 502){
+      if (c.nomes) { dados.linhas[L].nomes = c.nomes; render(); }
+      var det = (c.divergencias || []).map(function(x){ return 'Comp. ' + x.componente + ': esperado "' + x.esperado + '", lido "' + x.lido + '"'; }).join('<br>');
+      abrirModal(r.status === 409 ? 'Nome alterado por outra pessoa' : 'Gravação não confirmada',
+        '<div class="aviso ' + (r.status === 409 ? 'warn' : 'bad') + '">' + esc(c.mensagem) + '</div>' + (det ? '<div class="aviso bad">' + det + '</div>' : '') +
+        (c.erroEscrita ? '<div class="aviso bad">Erro de escrita: ' + esc(c.erroEscrita) + '</div>' : '') + ok);
+      $('res-ok').onclick = function(){ fecharModal(); carregar(true); }; return;
+    }
+    if ([400, 401, 403, 429, 503, 504].indexOf(r.status) < 0){
+      abrirModal('Resultado incerto', '<div class="aviso warn">Sem resposta válida do servidor (' + (r.status ? 'HTTP ' + r.status : 'sem conexão') + '). Recarregue e confira os nomes; o servidor relê os nomes do CLP a cada 30 s.</div>' + ok);
+      $('res-ok').onclick = function(){ fecharModal(); carregar(true); }; return;
+    }
+    var t = textoErro(r);
+    if (r.status === 401 || r.status === 429) return;
+    abrirModal('Nomes não gravados', '<div class="aviso warn">' + esc(t) + '</div>' + ok);
+    $('res-ok').onclick = fecharModal;
+  }
+  $('btn-nomes').addEventListener('click', function(){ if (dados) abrirNomes(); });
+
   // ── Presets ─────────────────────────────────────────────────────────────
   function renderPresets(){
     var lista = (dados && dados.presets && dados.presets[linhaAtiva]) || [];
     $('preset-sel').innerHTML = lista.length
-      ? lista.map(function(p, i){ return '<option value="' + i + '">' + esc(p.nome) + ' — ' + p.pct.slice(0, p.n).map(fmt).join(' / ') + '</option>'; }).join('')
+      ? lista.map(function(p, i){ return '<option value="' + i + '">' + esc(p.nome) + ' — ' + p.pct.slice(0, p.n).map(fmt).join(' / ') +
+          (Array.isArray(p.umidade) ? ' · umid. ' + p.umidade.slice(0, p.n).map(fmt).join(' / ') : '') + '</option>'; }).join('')
       : '<option value="">(nenhum preset salvo nesta linha)</option>';
     $('msg-preset').textContent = '';
   }
   function presetSel(){ var l = (dados.presets[linhaAtiva] || []), i = $('preset-sel').value; return i === '' ? null : l[+i]; }
   $('btn-preset-aplicar').addEventListener('click', function(){
     var p = presetSel(); if (!p) return;
-    edicao[linhaAtiva] = p.pct.map(function(v){ return v ? fmt(v) : ''; });
+    edicao[linhaAtiva] = { pct: p.pct.map(function(v){ return v ? fmt(v) : ''; }),
+                           um: Array.isArray(p.umidade) ? p.umidade.map(function(v){ return v ? fmt(v) : ''; }) : edicao[linhaAtiva].um };
     render();
     $('msg-preset').className = 'msg ok'; $('msg-preset').textContent = 'Preset "' + p.nome + '" aplicado no formulário — nada foi gravado. Use "Revisar alteração".';
   });
@@ -519,7 +647,7 @@
     if (a.erro){ $('msg-preset').className = 'msg bad'; $('msg-preset').textContent = 'Corrija o formulário antes de salvar: ' + a.erro; return; }
     var nome = (prompt('Nome do preset (Linha ' + linhaAtiva + '):') || '').trim();
     if (!nome) return;
-    var r = await api('POST', '/api/receitas/presets/' + linhaAtiva, { nome: nome, usuario: operador(), pct: a.cs.map(function(c){ return c / 100; }) });
+    var r = await api('POST', '/api/receitas/presets/' + linhaAtiva, { nome: nome, usuario: operador(), pct: a.cs.map(function(c){ return c / 100; }), umidade: a.ucs.map(function(c){ return c / 100; }) });
     if (r.status === 200){ dados.presets = r.corpo.presets; renderPresets(); $('msg-preset').className = 'msg ok'; $('msg-preset').textContent = 'Preset salvo.'; carregarLog(); }
     else { $('msg-preset').className = 'msg bad'; $('msg-preset').textContent = textoErro(r); }
   });
@@ -541,8 +669,17 @@
     var itens = r.corpo.filter(function(x){ return x.linha === linhaAtiva; }).slice(0, 15);
     if (!itens.length){ $('log-lista').innerHTML = '<div class="msg">Nenhuma alteração registrada nesta linha.</div>'; return; }
     $('log-lista').innerHTML = itens.map(function(x){
-      var o = x.rota === 'preset_salvar' ? 'preset salvo: ' + x.preset : x.rota === 'preset_excluir' ? 'preset excluído: ' + x.preset : (ROTULO[x.resultado] || x.resultado);
-      var det = x.antes && x.depois ? x.antes.pct.slice(0, Math.max(x.antes.n, x.depois.n)).map(fmt).join('/') + ' → ' + x.depois.pct.slice(0, Math.max(x.antes.n, x.depois.n)).map(fmt).join('/') : '';
+      var o = x.rota === 'preset_salvar' ? 'preset salvo: ' + x.preset : x.rota === 'preset_excluir' ? 'preset excluído: ' + x.preset
+            : (x.rota === 'nomes' ? 'nomes: ' : '') + (ROTULO[x.resultado] || x.resultado);
+      var det = '';
+      if (x.rota === 'nomes' && x.antes && x.depois)
+        det = Object.keys(x.depois).map(function(k){ return k + ': ' + (x.antes[k] || '—') + ' → ' + (x.depois[k] || '—'); }).join(', ');
+      else if (x.antes && x.depois && x.antes.pct && x.depois.pct){
+        var nn = Math.max(x.antes.n, x.depois.n);
+        det = x.antes.pct.slice(0, nn).map(fmt).join('/') + ' → ' + x.depois.pct.slice(0, nn).map(fmt).join('/');
+        if (x.antes.umidade && x.depois.umidade && x.antes.umidade.some(function(v, k){ return v !== x.depois.umidade[k]; }))
+          det += ' · umid. ' + x.antes.umidade.slice(0, nn).map(fmt).join('/') + ' → ' + x.depois.umidade.slice(0, nn).map(fmt).join('/');
+      }
       return '<div class="log-item"><div class="t">' + esc(new Date(x.ts).toLocaleString('pt-BR')) + ' · ' + esc(x.usuario || '—') + (x.forcar ? ' · forçado' : '') + '</div><div><b>' + esc(o) + '</b> ' + esc(det) + '</div></div>';
     }).join('');
   }

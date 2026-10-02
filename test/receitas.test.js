@@ -7,7 +7,7 @@ const os      = require('os');
 const path    = require('path');
 const express = require('express');
 const criarReceitas = require('../receitas');
-const { validarPct, ipConfiavel, pinConfere } = criarReceitas;
+const { validarPct, ipConfiavel, pinConfere, validarUmidade, normalizarNome } = criarReceitas;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const PIN = '4321';
@@ -20,6 +20,17 @@ class FakeGroup {
   constructor() { this.tags = []; }
   add(t) { if (!this.tags.includes(t)) this.tags.push(t); }
 }
+// STRING Logix pelos membros: .LEN (DINT) e .DATA[0..81] (SINT)
+function setNome(mem, L, i, txt, len) {
+  const b = `NOME_PRODUTO0${i}_${L}`;
+  for (let k = 0; k < 82; k++) mem[`${b}.DATA[${k}]`] = k < txt.length ? txt.charCodeAt(k) : 0;
+  mem[`${b}.LEN`] = len != null ? len : txt.length;
+}
+function lerNomeMem(mem, L, i) {
+  const b = `NOME_PRODUTO0${i}_${L}`, n = mem[`${b}.LEN`];
+  let t = ''; for (let k = 0; k < n; k++) t += String.fromCharCode(mem[`${b}.DATA[${k}]`]);
+  return t.replace(/\x00/g, '');
+}
 class FakePLC {
   constructor() {
     this.mem = {};
@@ -29,7 +40,11 @@ class FakePLC {
       this.mem[`VA_RECEITAS_${L}WF005[2]`] = 2;
       this.mem[`VD_MR_RECEITAS_${L}[0]`] = 0;
       this.mem[`COUNTER_MR_RECEITAS_${L}[0].ACC`] = 0;
+      for (let i = 1; i <= 9; i++) this.mem[`VA_${L}_UMIDADE[${i}]`] = Math.fround(i === 1 ? 9 : 0);
+      for (let i = 1; i <= 9; i++) setNome(this.mem, L, i, '');
     }
+    setNome(this.mem, '501', 1, 'BRASKEM'); setNome(this.mem, '501', 2, 'PAMPA');
+    setNome(this.mem, '501', 3, '', 11); // como no L5K: LEN 11 com DATA zerado
     this.escritas = []; this.ignorar = new Set(); this.falharEscrita = null; this.atrasoLeitura = 0;
     this.ativas = 0; this.maxAtivas = 0;
   }
@@ -44,7 +59,7 @@ class FakePLC {
   async writeTagGroup(g) {
     this.escritas.push(g.tags.map(t => [t.name, t.value]));
     if (this.falharEscrita) throw this.falharEscrita;
-    for (const t of g.tags) if (!this.ignorar.has(t.name)) this.mem[t.name] = Math.fround(t.value);
+    for (const t of g.tags) if (!this.ignorar.has(t.name)) this.mem[t.name] = /\.(LEN|DATA)/.test(t.name) ? t.value : Math.fround(t.value);
     for (const L of ['501', '502']) { // CPT do CLP: [0] = soma de [1..9] em REAL
       let s = Math.fround(0);
       for (let i = 1; i <= 9; i++) s = Math.fround(s + this.mem[`PERCENTUAL_RECEITA_${L}[${i}]`]);
@@ -58,9 +73,11 @@ async function montar(o = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'receitas-'));
   const plc = new FakePLC();
   const env = 'env' in o ? o.env : { RECEITAS_PIN: PIN };
+  const cache = { nomes: { 501: ['BRASKEM', 'PAMPA', '', '', '', '', '', '', ''], 502: Array(9).fill('') } };
   const r = criarReceitas({
     Tag: FakeTag, TagGroup: FakeGroup, dir, env,
-    getNomes: () => ({ 501: ['BRASKEM', 'PAMPA', '', '', '', '', '', '', ''], 502: Array(9).fill('') }),
+    getNomes: () => cache.nomes,
+    onNomes: (L, nomes) => { cache.nomes = { ...cache.nomes, [L]: nomes }; },
     timeoutMs: 400, pausaReleituraMs: 5, leituraMs: 1000, esperaLockMs: 100, bloqueioMs: 300,
     ...o.opts,
   });
@@ -83,7 +100,7 @@ async function montar(o = {}) {
   }
   const fechar = async () => { parado = true; await r._aguardarArquivos(); await new Promise(res => srv.close(res)); fs.rmSync(dir, { recursive: true, force: true }); };
   const log = () => { const f = path.join(dir, 'receitas_log.jsonl'); return fs.existsSync(f) ? fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map(JSON.parse) : []; };
-  return { r, plc, req, fechar, log, dir, setCiclo: v => { rodando = v; } };
+  return { r, plc, req, fechar, log, dir, cache, setCiclo: v => { rodando = v; } };
 }
 
 const ANT = { pct: [75, 25, 0, 0, 0, 0, 0, 0, 0], n: 2 };
@@ -418,5 +435,194 @@ test('drenagem espera a leitura de nomes e desiste do ciclo se ela demorar', asy
     await t.r.processarFila(t.plc);
     const r = await pend;
     assert.equal(r.status, 200);
+  } finally { await t.fechar(); }
+});
+
+// ─── Umidade ──────────────────────────────────────────────────────────────────
+const UM = [9, 0, 0, 0, 0, 0, 0, 0, 0];
+const ANT_U = { ...ANT, umidade: UM };
+const corpoU = (pct, umidade, extra = {}) => ({ usuario: 'Teste', pct, umidade, anterior: ANT_U, ...extra });
+
+test('validarUmidade — matriz', () => {
+  assert.equal(validarUmidade([9, 0, 0, 0, 0, 0, 0, 0, 0]).ok, true);
+  assert.equal(validarUmidade([30, 0, 0, 0, 0, 0, 0, 0, 0]).ok, true);
+  assert.equal(validarUmidade([30.01, 0, 0, 0, 0, 0, 0, 0, 0]).erro, 'umidade_fora_da_faixa');
+  assert.equal(validarUmidade([-1, 0, 0, 0, 0, 0, 0, 0, 0]).erro, 'umidade_fora_da_faixa');
+  assert.equal(validarUmidade([9.123, 0, 0, 0, 0, 0, 0, 0, 0]).erro, 'umidade_invalida');
+  assert.equal(validarUmidade([9]).erro, 'umidade_invalida');
+});
+
+test('GET devolve a umidade', async () => {
+  const t = await montar();
+  try {
+    await sleep(30);
+    const r = await t.req('GET', '/api/receitas');
+    assert.deepEqual(r.corpo.linhas['501'].umidade, UM);
+  } finally { await t.fechar(); }
+});
+
+test('POST só de umidade grava no mesmo writeTagGroup e confere', async () => {
+  const t = await montar();
+  try {
+    await sleep(30);
+    const r = await t.req('POST', '/api/receitas/501', corpoU([75, 25, 0, 0, 0, 0, 0, 0, 0], [8.5, 1.25, 0, 0, 0, 0, 0, 0, 0]));
+    assert.equal(r.status, 200, JSON.stringify(r.corpo));
+    assert.deepEqual(r.corpo.lido.umidade.slice(0, 2), [8.5, 1.25]);
+    assert.equal(t.plc.escritas.length, 1);
+    assert.ok(t.plc.escritas[0].some(e => e[0] === 'VA_501_UMIDADE[1]'));
+    assert.equal(t.plc.mem['VA_501_UMIDADE[2]'], Math.fround(1.25));
+    assert.equal(t.plc.mem['VA_502_UMIDADE[1]'], Math.fround(9), '502 intocada');
+    await t.r._aguardarArquivos();
+    const ult = t.log().pop();
+    assert.equal(ult.resultado, 'ok'); assert.deepEqual(ult.antes.umidade, UM); assert.deepEqual(ult.depois.umidade.slice(0, 2), [8.5, 1.25]);
+  } finally { await t.fechar(); }
+});
+
+test('POST pct + umidade juntos', async () => {
+  const t = await montar();
+  try {
+    await sleep(30);
+    const r = await t.req('POST', '/api/receitas/502', corpoU([60, 40, 0, 0, 0, 0, 0, 0, 0], [7, 2, 0, 0, 0, 0, 0, 0, 0]));
+    assert.equal(r.status, 200, JSON.stringify(r.corpo));
+    assert.deepEqual(r.corpo.lido.pct.slice(0, 2), [60, 40]);
+    assert.deepEqual(r.corpo.lido.umidade.slice(0, 2), [7, 2]);
+    assert.equal(t.plc.escritas.length, 1);
+  } finally { await t.fechar(); }
+});
+
+test('umidade — 400 de validação e sem_alteracao', async () => {
+  const t = await montar();
+  try {
+    await sleep(30);
+    let r = await t.req('POST', '/api/receitas/501', corpoU([75, 25, 0, 0, 0, 0, 0, 0, 0], [31, 0, 0, 0, 0, 0, 0, 0, 0]));
+    assert.equal(r.status, 400); assert.equal(r.corpo.erro, 'umidade_fora_da_faixa');
+    r = await t.req('POST', '/api/receitas/501', corpoU([75, 25, 0, 0, 0, 0, 0, 0, 0], UM));
+    assert.equal(r.status, 400); assert.equal(r.corpo.erro, 'sem_alteracao');
+    r = await t.req('POST', '/api/receitas/501', { usuario: 'T', pct: [75, 25, 0, 0, 0, 0, 0, 0, 0], umidade: [8, 0, 0, 0, 0, 0, 0, 0, 0], anterior: ANT });
+    assert.equal(r.status, 400); assert.equal(r.corpo.erro, 'anterior_obrigatorio');
+    assert.equal(t.plc.escritas.length, 0);
+  } finally { await t.fechar(); }
+});
+
+test('umidade — 409 se mudou no CLP, 409 com pesagem, 502 se o CLP não aceitar', async () => {
+  const t = await montar();
+  try {
+    await sleep(30);
+    t.plc.mem['VA_501_UMIDADE[1]'] = Math.fround(10);
+    let r = await t.req('POST', '/api/receitas/501', corpoU([75, 25, 0, 0, 0, 0, 0, 0, 0], [8, 0, 0, 0, 0, 0, 0, 0, 0]));
+    assert.equal(r.status, 409); assert.equal(r.corpo.erro, 'conflito'); assert.equal(r.corpo.atual.umidade[0], 10);
+    t.plc.mem['VA_501_UMIDADE[1]'] = Math.fround(9);
+    t.plc.mem['VD_MR_RECEITAS_501[0]'] = 0x04;
+    r = await t.req('POST', '/api/receitas/501', corpoU([75, 25, 0, 0, 0, 0, 0, 0, 0], [8, 0, 0, 0, 0, 0, 0, 0, 0]));
+    assert.equal(r.status, 409); assert.equal(r.corpo.erro, 'pesagem_em_andamento');
+    t.plc.mem['VD_MR_RECEITAS_501[0]'] = 0;
+    t.plc.ignorar.add('VA_501_UMIDADE[1]');
+    r = await t.req('POST', '/api/receitas/501', corpoU([75, 25, 0, 0, 0, 0, 0, 0, 0], [8, 0, 0, 0, 0, 0, 0, 0, 0]));
+    assert.equal(r.status, 502); assert.equal(r.corpo.erro, 'divergencia');
+    assert.ok(r.corpo.divergencias.some(d => d.campo === 'umidade' && d.componente === 1));
+  } finally { await t.fechar(); }
+});
+
+test('presets guardam a umidade (opcional)', async () => {
+  const t = await montar();
+  try {
+    let r = await t.req('POST', '/api/receitas/presets/501', { nome: 'A', usuario: 'u', pct: [70, 30, 0, 0, 0, 0, 0, 0, 0], umidade: [8, 1, 0, 0, 0, 0, 0, 0, 0] });
+    assert.equal(r.status, 200); assert.deepEqual(r.corpo.presets['501'][0].umidade.slice(0, 2), [8, 1]);
+    r = await t.req('POST', '/api/receitas/presets/501', { nome: 'B', usuario: 'u', pct: [70, 30, 0, 0, 0, 0, 0, 0, 0] });
+    assert.equal(r.status, 200); assert.equal(r.corpo.presets['501'][1].umidade, undefined);
+    r = await t.req('POST', '/api/receitas/presets/501', { nome: 'C', usuario: 'u', pct: [70, 30, 0, 0, 0, 0, 0, 0, 0], umidade: [40, 0, 0, 0, 0, 0, 0, 0, 0] });
+    assert.equal(r.status, 400);
+  } finally { await t.fechar(); }
+});
+
+// ─── Nomes ────────────────────────────────────────────────────────────────────
+const NOMES = ['BRASKEM', 'PAMPA', '', '', '', '', '', '', ''];
+const corpoN = (nomes, extra = {}) => ({ usuario: 'Teste', nomes, anterior: NOMES, ...extra });
+
+test('normalizarNome — matriz', () => {
+  assert.equal(normalizarNome(' calcario '), 'CALCARIO');
+  assert.equal(normalizarNome('ABCDEFGHIJKL'), 'ABCDEFGHIJKL');
+  assert.equal(normalizarNome('ABCDEFGHIJKLM'), null);
+  assert.equal(normalizarNome('GESSO-2 (B)'), 'GESSO-2 (B)');
+  assert.equal(normalizarNome('ÂMBAR'), null);
+  assert.equal(normalizarNome(''), '');
+  assert.equal(normalizarNome(5), null);
+});
+
+test('nomes: grava só os alterados, zera o resto do DATA, atualiza o cache', async () => {
+  const t = await montar();
+  try {
+    await sleep(30);
+    const r = await t.req('POST', '/api/receitas/501/nomes', corpoN(['BRK', 'PAMPA', 'calcario', '', '', '', '', '', '']));
+    assert.equal(r.status, 200, JSON.stringify(r.corpo));
+    assert.deepEqual(r.corpo.nomes.slice(0, 3), ['BRK', 'PAMPA', 'CALCARIO']);
+    assert.equal(lerNomeMem(t.plc.mem, '501', 1), 'BRK');
+    assert.equal(t.plc.mem['NOME_PRODUTO01_501.LEN'], 3);
+    for (let k = 3; k < 7; k++) assert.equal(t.plc.mem[`NOME_PRODUTO01_501.DATA[${k}]`], 0, `DATA[${k}] zerado`);
+    assert.equal(t.plc.mem['NOME_PRODUTO03_501.LEN'], 8);
+    assert.equal(lerNomeMem(t.plc.mem, '501', 3), 'CALCARIO');
+    assert.equal(t.plc.escritas.length, 1);
+    assert.ok(!t.plc.escritas[0].some(e => e[0].startsWith('NOME_PRODUTO02_501')), 'PAMPA não regravado');
+    assert.ok(!t.plc.escritas[0].some(e => e[0].startsWith('PERCENTUAL')), 'receita intocada');
+    assert.deepEqual(t.cache.nomes['501'].slice(0, 3), ['BRK', 'PAMPA', 'CALCARIO']);
+    const g = await t.req('GET', '/api/receitas');
+    assert.equal(g.corpo.linhas['501'].nomes[2], 'CALCARIO');
+    await t.r._aguardarArquivos();
+    const ult = t.log().pop();
+    assert.equal(ult.rota, 'nomes'); assert.equal(ult.resultado, 'ok'); assert.deepEqual(ult.depois, { 1: 'BRK', 3: 'CALCARIO' });
+  } finally { await t.fechar(); }
+});
+
+test('nomes: validação (400), conflito (409), divergência (502), liberado durante pesagem', async () => {
+  const t = await montar();
+  try {
+    await sleep(30);
+    let r = await t.req('POST', '/api/receitas/501/nomes', corpoN(['BRASKEM', 'PAMPA', 'NOME MUITO LONGO', '', '', '', '', '', '']));
+    assert.equal(r.status, 400); assert.equal(r.corpo.erro, 'nome_invalido'); assert.equal(r.corpo.componente, 3);
+    r = await t.req('POST', '/api/receitas/501/nomes', corpoN(['BRASKEM', 'PAMPA', 'CALCÁRIO', '', '', '', '', '', '']));
+    assert.equal(r.status, 400);
+    r = await t.req('POST', '/api/receitas/501/nomes', corpoN(NOMES));
+    assert.equal(r.status, 400); assert.equal(r.corpo.erro, 'sem_alteracao');
+    r = await t.req('POST', '/api/receitas/501/nomes', corpoN(['X', 'PAMPA', '', '', '', '', '', '', '']), '0000');
+    assert.equal(r.status, 401);
+    assert.equal(t.plc.escritas.length, 0);
+
+    setNome(t.plc.mem, '501', 2, 'AMBAR'); // alguém trocou pelo supervisório
+    r = await t.req('POST', '/api/receitas/501/nomes', corpoN(['BRASKEM', 'PAMPA2', '', '', '', '', '', '', '']));
+    assert.equal(r.status, 409); assert.equal(r.corpo.erro, 'conflito'); assert.equal(r.corpo.nomes[1], 'AMBAR');
+    assert.equal(t.plc.escritas.length, 0);
+
+    t.plc.mem['VD_MR_RECEITAS_501[0]'] = 0x04; // pesando: nome não afeta processo
+    r = await t.req('POST', '/api/receitas/501/nomes', corpoN(['CLINQUER', 'PAMPA', '', '', '', '', '', '', '']));
+    assert.equal(r.status, 200, JSON.stringify(r.corpo));
+
+    t.plc.ignorar.add('NOME_PRODUTO01_501.DATA[0]');
+    r = await t.req('POST', '/api/receitas/501/nomes', { usuario: 'T', nomes: ['ZZ', 'PAMPA', '', '', '', '', '', '', ''], anterior: ['CLINQUER', 'PAMPA', '', '', '', '', '', '', ''] });
+    assert.equal(r.status, 502); assert.equal(r.corpo.erro, 'divergencia');
+    assert.equal(r.corpo.divergencias[0].componente, 1);
+  } finally { await t.fechar(); }
+});
+
+test('nomes: nome existente em minúsculas não é regravado se não foi editado', async () => {
+  const t = await montar();
+  try {
+    await sleep(30);
+    setNome(t.plc.mem, '501', 2, 'pampa');
+    const ant = ['BRASKEM', 'pampa', '', '', '', '', '', '', ''];
+    const r = await t.req('POST', '/api/receitas/501/nomes', { usuario: 'T', nomes: ['BRASKEM', 'pampa', 'GESSO', '', '', '', '', '', ''], anterior: ant });
+    assert.equal(r.status, 200, JSON.stringify(r.corpo));
+    assert.equal(lerNomeMem(t.plc.mem, '501', 2), 'pampa');
+    assert.ok(!t.plc.escritas[0].some(e => e[0].startsWith('NOME_PRODUTO02_501')));
+  } finally { await t.fechar(); }
+});
+
+test('nomes: zera lixo no DATA além do LEN antigo', async () => {
+  const t = await montar();
+  try {
+    await sleep(30);
+    t.plc.mem['NOME_PRODUTO02_501.DATA[50]'] = 88; // lixo que o server.js mostraria
+    const r = await t.req('POST', '/api/receitas/501/nomes', corpoN(['BRASKEM', 'AMB', '', '', '', '', '', '', '']));
+    assert.equal(r.status, 200, JSON.stringify(r.corpo));
+    for (let k = 3; k < 82; k++) assert.equal(t.plc.mem[`NOME_PRODUTO02_501.DATA[${k}]`], 0, `DATA[${k}]`);
   } finally { await t.fechar(); }
 });

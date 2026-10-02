@@ -434,7 +434,10 @@ app.use(cors()); app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Receitas 501/502 (leitura/escrita via fila drenada no ciclo do CLP) — ver receitas.js
-const receitas = criarReceitas({ Tag, TagGroup, dir: __dirname, getNomes: () => nomesCache });
+const receitas = criarReceitas({
+  Tag, TagGroup, dir: __dirname, getNomes: () => nomesCache,
+  onNomes: (linha, nomes) => { nomesCache = { ...nomesCache, [linha]: nomes }; broadcast({ tipo: 'nomes_produtos', nomes: nomesCache }); },
+});
 app.use(receitas.router);
 
 function broadcast(data) {

@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Vibração — 502BM140</title>
+<style>
+  :root{
+    --bg:#12151a; --panel:#1b1f26; --panel2:#20252d; --line:#2a2f38;
+    --text:#e4e7eb; --dim:#8891a0; --accent:#3fa9f5;
+    --ok:#3fbf6f; --alerta:#e8a83f; --alarme:#e5504f;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:'Segoe UI',Roboto,Arial,sans-serif;-webkit-tap-highlight-color:transparent;}
+  header{padding:16px 16px 8px;border-bottom:1px solid var(--line);}
+  header h1{font-size:16px;margin:0 0 2px;letter-spacing:.3px;}
+  header p{margin:0;font-size:12px;color:var(--dim);}
+  main{padding:12px;max-width:640px;margin:0 auto;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px;}
+  .row{display:flex;gap:8px;flex-wrap:wrap;}
+  select,button{
+    font-size:14px;padding:10px 12px;border-radius:8px;border:1px solid var(--line);
+    background:var(--panel2);color:var(--text);
+  }
+  select{flex:1;min-width:130px;}
+  button{cursor:pointer;font-weight:600;}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#08131c;}
+  button.stop{background:var(--alarme);border-color:var(--alarme);color:#1a0505;}
+  button:disabled{opacity:.4;cursor:default;}
+  .label{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
+  .live{display:flex;justify-content:space-between;align-items:baseline;padding:10px 0;border-bottom:1px solid var(--line);}
+  .live:last-child{border-bottom:none;}
+  .live .axis{font-size:13px;color:var(--dim);width:20px;}
+  .live .val{font-size:22px;font-variant-numeric:tabular-nums;font-weight:600;}
+  .live .unit{font-size:11px;color:var(--dim);margin-left:4px;}
+  .status{font-size:12px;color:var(--dim);text-align:center;margin-top:8px;min-height:16px;}
+  .assign{display:flex;gap:8px;margin-top:10px;}
+  .assign select{flex:1;}
+  .hist{max-height:260px;overflow-y:auto;}
+  table{width:100%;border-collapse:collapse;font-size:12px;}
+  th,td{padding:6px 4px;text-align:left;border-bottom:1px solid var(--line);}
+  th{color:var(--dim);font-weight:600;}
+  td.v{font-variant-numeric:tabular-nums;}
+  .tag-ok{color:var(--ok);} .tag-alerta{color:var(--alerta);} .tag-alarme{color:var(--alarme);font-weight:700;}
+  canvas{width:100%;height:180px;display:block;}
+  .legend{display:flex;gap:14px;font-size:11px;color:var(--dim);margin-top:6px;flex-wrap:wrap;}
+  .legend span{display:inline-flex;align-items:center;gap:5px;}
+  .dot{width:8px;height:8px;border-radius:2px;display:inline-block;}
+  .warn{font-size:11px;color:var(--dim);line-height:1.5;background:var(--panel2);border-radius:8px;padding:10px;margin-top:4px;}
+  .icons{display:flex;gap:8px;}
+  .small{font-size:12px;padding:8px 10px;}
+</style>
+</head>
+<body>
+<header>
+  <a href="index.html" style="font-size:12px;color:var(--accent);text-decoration:none;display:inline-block;margin-bottom:6px;">← Painel geral</a>
+  <h1>Vibração — Redutores 501BM140 / 502BM140</h1>
+  <p>Sensor fixo (ESP32-S3 + ADXL345) · leitura automática ISO 10816-3</p>
+  <p id="syncStatus" style="font-size:11px;color:var(--dim);margin-top:4px;">Conectando à nuvem…</p>
+</header>
+
+<main>
+
+  <div class="card">
+    <div class="label">Moinho e ponto de medição</div>
+    <div class="row">
+      <select id="moinho"></select>
+      <select id="ponto"></select>
+    </div>
+    <div class="status" id="status">Selecione o moinho e o ponto para visualizar o histórico de leituras do sensor.</div>
+  </div>
+
+  <div class="card">
+    <div class="label">Cadastrar equipamento</div>
+    <div class="row">
+      <input id="novoMoinho" type="text" placeholder="Novo moinho (ex: 503BM140)" style="flex:1;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:14px;">
+      <button id="btnAddMoinho" class="small">Adicionar</button>
+    </div>
+    <div id="listaMoinhos" style="margin-top:8px;"></div>
+    <div class="row" style="margin-top:12px;">
+      <input id="novoPonto" type="text" placeholder="Novo ponto (ex: Mancal de escora)" style="flex:1;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:14px;">
+      <button id="btnAddPonto" class="small">Adicionar</button>
+    </div>
+    <div id="listaPontos" style="margin-top:8px;"></div>
+    <div class="warn" style="margin-top:10px;">Cada ponto cadastrado aqui pode ser medido nos 3 eixos (Horizontal/Vertical/Axial), do mesmo jeito que os pontos padrão.</div>
+  </div>
+
+
+  <div class="card">
+    <div class="label">Histórico — <span id="graphPonto">502BM140 · Mancal Motor LOA</span></div>
+    <div class="row" style="margin-bottom:8px;">
+      <select id="periodo">
+        <option value="7">Últimos 7 dias</option>
+        <option value="30" selected>Últimos 30 dias</option>
+        <option value="90">Últimos 90 dias</option>
+        <option value="all">Tudo</option>
+      </select>
+    </div>
+    <canvas id="chart"></canvas>
+    <div class="legend">
+      <span><span class="dot" style="background:#3fa9f5"></span>Horizontal</span>
+      <span><span class="dot" style="background:#3fbf6f"></span>Vertical</span>
+      <span><span class="dot" style="background:#c98be0"></span>Axial</span>
+      <span><span class="dot" style="background:#e8a83f"></span>Alerta 4,5</span>
+      <span><span class="dot" style="background:#e5504f"></span>Alarme 7,1</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="label">Registros salvos</div>
+    <div class="hist">
+      <table>
+        <thead><tr><th>Data/hora</th><th>Moinho</th><th>Ponto</th><th>Eixo</th><th>mm/s</th><th></th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div class="row" style="margin-top:10px;">
+      <button id="btnExport" class="small" style="flex:1;">Exportar JSON</button>
+      <button id="btnClear" class="small" style="flex:1;">Limpar tudo</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="label">Sobre este sensor</div>
+    <div class="warn">
+      Leituras geradas automaticamente por um sensor fixo (ESP32-S3 + ADXL345) instalado no ponto de medição, amostrando a 200 Hz e enviando a média das leituras ao Firestore a cada 3 horas. Limiares conforme ISO 10816-3 (Alerta 4,5 mm/s, Alarme 7,1 mm/s).
+    </div>
+  </div>
+  <div id="confirmOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;align-items:center;justify-content:center;padding:20px;">
+    <div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;max-width:340px;width:100%;">
+      <div id="confirmMsg" style="font-size:14px;margin-bottom:16px;white-space:pre-line;"></div>
+      <div class="row">
+        <button id="confirmCancel" class="small" style="flex:1;">Cancelar</button>
+        <button id="confirmOk" class="small stop" style="flex:1;">Excluir</button>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore-compat.js"></script>
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyAvfGsgnQRU3m35Pzd_7M-zg42tr4brz60",
+  authDomain: "analise-de-vibracao-fe8fc.firebaseapp.com",
+  projectId: "analise-de-vibracao-fe8fc",
+  storageBucket: "analise-de-vibracao-fe8fc.firebasestorage.app",
+  messagingSenderId: "1087450983979",
+  appId: "1:1087450983979:web:9ff238f8042623a9b5446e"
+};
+let db = null;
+try{
+  firebase.initializeApp(firebaseConfig);
+  db = firebase.firestore();
+}catch(e){
+  console.error('Erro ao iniciar Firebase:', e);
+}
+</script>
+<script>
+const ALERTA = 4.5, ALARME = 7.1;
+const STORE_KEY = 'vib_celular_502bm140_v1';
+
+// ---- Confirmação própria (não depende de window.confirm, bloqueado em iframes sandboxed) ----
+function confirmDialog(msg){
+  return new Promise((resolve)=>{
+    const overlay = document.getElementById('confirmOverlay');
+    document.getElementById('confirmMsg').textContent = msg;
+    overlay.style.display = 'flex';
+    const okBtn = document.getElementById('confirmOk');
+    const cancelBtn = document.getElementById('confirmCancel');
+    function cleanup(result){
+      overlay.style.display = 'none';
+      okBtn.removeEventListener('click', onOk);
+      cancelBtn.removeEventListener('click', onCancel);
+      resolve(result);
+    }
+    function onOk(){ cleanup(true); }
+    function onCancel(){ cleanup(false); }
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+  });
+}
+
+function loadData(){ try{ return JSON.parse(localStorage.getItem(STORE_KEY))||[]; }catch(e){ return []; } }
+function saveData(d){ localStorage.setItem(STORE_KEY, JSON.stringify(d)); }
+let registros = loadData();
+
+// ---- Catálogo cadastrável de moinhos e pontos ----
+const MOINHOS_KEY = 'vib_moinhos_v1';
+const PONTOS_KEY = 'vib_pontos_v1';
+// Moinhos continuam com padrão: 501BM140/502BM140 são os equipamentos
+// reais monitorados, não exemplos genéricos.
+const MOINHOS_DEFAULT = ['502BM140','501BM140'];
+
+// Pontos NÃO têm mais padrão - só entram no combobox os pontos que forem
+// cadastrados manualmente. Esta lista serve só para filtrar/remover os
+// pontos-exemplo antigos que já tinham sido salvos no localStorage/nuvem
+// antes dessa mudança (não é mais usada como semente nem gera tag "(padrão)").
+const PONTOS_PADRAO_LEGADO = ['Mancal Motor LOA','Mancal Motor LA','Redutor entrada LOA','Redutor entrada LA','Rolamento pinhão LOA','Rolamento pinhão LA'];
+
+function loadList(key, def){ try{ const v = JSON.parse(localStorage.getItem(key)); return (v && v.length) ? v : [...def]; }catch(e){ return [...def]; } }
+function saveList(key, arr){ localStorage.setItem(key, JSON.stringify(arr)); }
+function removerPontosLegado(lista){
+  const legadoNorm = PONTOS_PADRAO_LEGADO.map(p=>p.trim().toLowerCase());
+  return lista.filter(p=>!legadoNorm.includes((p||'').trim().toLowerCase()));
+}
+
+let moinhos = loadList(MOINHOS_KEY, MOINHOS_DEFAULT);
+let pontos = removerPontosLegado(loadList(PONTOS_KEY, []));
+saveList(PONTOS_KEY, pontos); // já grava limpo, caso tivesse padrão antigo salvo neste aparelho
+
+// ---- Sincronização do catálogo com o Firestore ----
+async function saveCatalogToCloud(){
+  if(!db) return;
+  try{
+    await db.collection('config').doc('catalogo').set({ moinhos, pontos }, { merge: true });
+  }catch(e){
+    console.error('Erro ao sincronizar catálogo:', e);
+  }
+}
+
+async function syncCatalogFromCloud(){
+  if(!db) return;
+  try{
+    const doc = await db.collection('config').doc('catalogo').get();
+    if(doc.exists){
+      const data = doc.data();
+      if(Array.isArray(data.moinhos) && data.moinhos.length) moinhos = data.moinhos;
+      if(Array.isArray(data.pontos) && data.pontos.length) pontos = data.pontos;
+      const pontosLimpos = removerPontosLegado(pontos);
+      const catalogoTinhaLegado = pontosLimpos.length !== pontos.length;
+      pontos = pontosLimpos;
+      saveList(MOINHOS_KEY, moinhos);
+      saveList(PONTOS_KEY, pontos);
+      refreshCatalogUI();
+      if(catalogoTinhaLegado) saveCatalogToCloud(); // remove os pontos padrão também do catálogo na nuvem, pra visao_geral.html e index.html pararem de mostrá-los
+    } else {
+      await saveCatalogToCloud(); // primeira vez: sobe o catálogo local como inicial
+    }
+  }catch(e){
+    console.error('Erro ao buscar catálogo da nuvem:', e);
+  }
+}
+
+function populateSelect(selectEl, items, preserveValue, placeholder){
+  const prev = preserveValue ? selectEl.value : null;
+  selectEl.innerHTML = '';
+  if(items.length === 0 && placeholder){
+    const opt = document.createElement('option');
+    opt.textContent = placeholder; opt.value = '';
+    selectEl.appendChild(opt);
+    return;
+  }
+  items.forEach(item=>{
+    const opt = document.createElement('option');
+    opt.textContent = item; opt.value = item;
+    selectEl.appendChild(opt);
+  });
+  if(prev && items.includes(prev)) selectEl.value = prev;
+}
+
+function renderCatalogList(containerId, items, key, defaults, otherSelectId){
+  const container = document.getElementById(containerId);
+  container.innerHTML = '';
+  items.forEach(item=>{
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px;';
+    const isDefault = defaults.includes(item);
+    row.innerHTML = `<span>${item}${isDefault?' <span style="color:var(--dim);font-size:11px;">(padrão)</span>':''}</span>`;
+    const btn = document.createElement('button');
+    btn.textContent = '✕';
+    btn.style.cssText = 'padding:3px 8px;font-size:13px;background:transparent;border:1px solid var(--line);color:var(--alarme);border-radius:6px;';
+    btn.addEventListener('click', async ()=>{
+      const ok = await confirmDialog(`Remover "${item}" da lista de cadastro?\n\n(Leituras já salvas com esse valor continuam no histórico.)`);
+      if(!ok) return;
+      const idx = items.indexOf(item);
+      items.splice(idx,1);
+      saveList(key, items);
+      saveCatalogToCloud();
+      renderCatalogList(containerId, items, key, defaults, otherSelectId);
+      populateSelect(document.getElementById(otherSelectId), items, true);
+      updateGraphLabel();
+    });
+    row.appendChild(btn);
+    container.appendChild(row);
+  });
+}
+
+function refreshCatalogUI(){
+  populateSelect(document.getElementById('moinho'), moinhos, true);
+  populateSelect(document.getElementById('ponto'), pontos, true, 'Nenhum ponto cadastrado ainda — adicione abaixo');
+  renderCatalogList('listaMoinhos', moinhos, MOINHOS_KEY, MOINHOS_DEFAULT, 'moinho');
+  renderCatalogList('listaPontos', pontos, PONTOS_KEY, [], 'ponto');
+}
+refreshCatalogUI();
+
+document.getElementById('btnAddMoinho').addEventListener('click', ()=>{
+  const input = document.getElementById('novoMoinho');
+  const val = input.value.trim();
+  if(!val) return;
+  if(moinhos.some(m=>m.toLowerCase()===val.toLowerCase())){
+    document.getElementById('status').textContent = `"${val}" já está cadastrado.`;
+    return;
+  }
+  moinhos.push(val);
+  saveList(MOINHOS_KEY, moinhos);
+  saveCatalogToCloud();
+  input.value = '';
+  refreshCatalogUI();
+});
+
+document.getElementById('btnAddPonto').addEventListener('click', ()=>{
+  const input = document.getElementById('novoPonto');
+  const val = input.value.trim();
+  if(!val) return;
+  if(pontos.some(p=>p.toLowerCase()===val.toLowerCase())){
+    document.getElementById('status').textContent = `"${val}" já está cadastrado.`;
+    return;
+  }
+  pontos.push(val);
+  saveList(PONTOS_KEY, pontos);
+  saveCatalogToCloud();
+  input.value = '';
+  refreshCatalogUI();
+});
+
+function updateGraphLabel(){
+  const moinho = document.getElementById('moinho').value;
+  const ponto = document.getElementById('ponto').value;
+  document.getElementById('graphPonto').textContent = `${moinho} · ${ponto}`;
+  drawChart();
+}
+document.getElementById('ponto').addEventListener('change', updateGraphLabel);
+document.getElementById('moinho').addEventListener('change', updateGraphLabel);
+
+document.getElementById('btnExport').addEventListener('click', ()=>{
+  const blob = new Blob([JSON.stringify(registros, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'vibracao_502bm140.json';
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById('btnClear').addEventListener('click', async ()=>{
+  const ok = await confirmDialog('Apagar TODOS os registros salvos — inclusive da nuvem, visível para qualquer aparelho conectado ao mesmo projeto?');
+  if(ok){
+    const idsParaExcluir = registros.filter(r=>r.fid).map(r=>r.fid);
+    registros = [];
+    saveData(registros);
+    renderTable();
+    drawChart();
+    if(db && idsParaExcluir.length){
+      try{
+        await Promise.all(idsParaExcluir.map(id=>db.collection('leituras').doc(id).delete()));
+      }catch(e){ console.error('Erro ao limpar registros na nuvem:', e); }
+    }
+  }
+});
+
+function tagClass(v){ return v>=ALARME ? 'tag-alarme' : v>=ALERTA ? 'tag-alerta' : 'tag-ok'; }
+
+function renderTable(){
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+  const ordenado = [...registros].sort((a,b)=>b.ts-a.ts);
+  for(const r of ordenado){
+    const tr = document.createElement('tr');
+    const d = new Date(r.ts);
+    tr.innerHTML = `<td>${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</td>
+      <td>${r.moinho||'—'}</td><td>${r.ponto}</td><td>${r.eixo}</td><td class="v ${tagClass(r.valor)}">${r.valor.toFixed(2)}</td>
+      <td><button data-ts="${r.ts}" class="btnExcluir" style="padding:4px 8px;font-size:14px;background:transparent;border:1px solid var(--line);color:var(--alarme);">✕</button></td>`;
+    tbody.appendChild(tr);
+  }
+  tbody.querySelectorAll('.btnExcluir').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const ts = Number(btn.dataset.ts);
+      const reg = registros.find(r=>r.ts===ts);
+      if(!reg) return;
+      const ok = await confirmDialog(`Excluir este registro?\n${reg.moinho} · ${reg.ponto} · ${reg.eixo} · ${reg.valor.toFixed(2)} mm/s`);
+      if(ok){
+        registros = registros.filter(r=>r.ts!==ts);
+        saveData(registros);
+        renderTable();
+        drawChart();
+        if(db && reg.fid){
+          try{ await db.collection('leituras').doc(reg.fid).delete(); }
+          catch(e){ console.error('Erro ao excluir da nuvem:', e); }
+        }
+      }
+    });
+  });
+}
+
+function drawChart(){
+  const canvas = document.getElementById('chart');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio||1;
+  const w = canvas.clientWidth, h = 180;
+  canvas.width = w*dpr; canvas.height = h*dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,w,h);
+
+  const moinho = document.getElementById('moinho').value;
+  const ponto = document.getElementById('ponto').value;
+  const periodo = document.getElementById('periodo').value;
+  const cores = {Horizontal:'#3fa9f5', Vertical:'#3fbf6f', Axial:'#c98be0'};
+
+  const normaliza = (s)=> (s||'').trim().toLowerCase();
+  let dados = registros.filter(r=>normaliza(r.ponto)===normaliza(ponto) && normaliza(r.moinho)===normaliza(moinho)).sort((a,b)=>a.ts-b.ts);
+  if(periodo !== 'all'){
+    const corteMs = Date.now() - Number(periodo)*24*60*60*1000;
+    dados = dados.filter(r=>r.ts >= corteMs);
+  }
+
+  const padL=32, padR=8, padT=10, padB=26;
+  const maxV = Math.max(ALARME*1.3, ...dados.map(d=>d.valor), 1);
+  const tsList = dados.map(d=>d.ts);
+  const minTs = tsList.length ? Math.min(...tsList) : Date.now()-1;
+  const maxTs = tsList.length ? Math.max(...tsList) : Date.now();
+  const spanTs = (maxTs - minTs) || 1;
+
+  function X(ts){ return padL + (w-padL-padR) * (ts-minTs)/spanTs; }
+  function Y(v){ return padT + (h-padT-padB)*(1 - v/maxV); }
+
+  // grid + eixo Y
+  ctx.strokeStyle = '#2a2f38'; ctx.fillStyle='#8891a0'; ctx.font='10px sans-serif';
+  [0, maxV/2, maxV].forEach(v=>{
+    const y = Y(v);
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(w-padR,y); ctx.stroke();
+    ctx.fillText(v.toFixed(1), 2, y+3);
+  });
+
+  // rótulos de data no eixo X (início, meio, fim do período com dados)
+  if(dados.length){
+    ctx.fillStyle = '#8891a0'; ctx.font = '10px sans-serif';
+    const fmt = (ts)=> new Date(ts).toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'});
+    const y = h - 8;
+    ctx.textAlign = 'left'; ctx.fillText(fmt(minTs), X(minTs), y);
+    if(spanTs > 0){
+      ctx.textAlign = 'center'; ctx.fillText(fmt(minTs + spanTs/2), X(minTs+spanTs/2), y);
+      ctx.textAlign = 'right'; ctx.fillText(fmt(maxTs), X(maxTs), y);
+    }
+    ctx.textAlign = 'left';
+  }
+
+  // linhas de limiar
+  function limiar(v, cor){
+    const y=Y(v); ctx.strokeStyle=cor; ctx.setLineDash([4,4]);
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(w-padR,y); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  limiar(ALERTA, '#e8a83f'); limiar(ALARME, '#e5504f');
+
+  // series por eixo (linha conecta só pontos do mesmo eixo, na ordem real do tempo)
+  for(const eixo of ['Horizontal','Vertical','Axial']){
+    const pts = dados.filter(d=>d.eixo===eixo);
+    if(pts.length===0) continue;
+    ctx.strokeStyle = cores[eixo]; ctx.fillStyle = cores[eixo]; ctx.lineWidth=2;
+    ctx.beginPath();
+    pts.forEach((p,i)=>{
+      const x = X(p.ts), y = Y(p.valor);
+      if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    });
+    ctx.stroke();
+    pts.forEach(p=>{
+      const x = X(p.ts), y = Y(p.valor);
+      ctx.beginPath(); ctx.arc(x,y,2.5,0,7); ctx.fill();
+    });
+  }
+
+  if(dados.length===0){
+    ctx.fillStyle='#8891a0'; ctx.font='12px sans-serif';
+    ctx.fillText('Sem registros neste período para este ponto.', padL, h/2);
+  }
+}
+
+document.getElementById('periodo').addEventListener('change', drawChart);
+
+renderTable();
+drawChart();
+
+// ---- Sincronização inicial com a nuvem ----
+async function syncLeiturasFromCloud(){
+  const statusEl = document.getElementById('syncStatus');
+  if(!db){
+    statusEl.textContent = 'Sem conexão com a nuvem — usando dados salvos neste aparelho.';
+    return;
+  }
+  try{
+    const snap = await db.collection('leituras').orderBy('ts','asc').get();
+    const nuvem = snap.docs.map(d=>({ fid: d.id, ...d.data() }));
+    if(nuvem.length){
+      registros = nuvem;
+      saveData(registros);
+      renderTable();
+      drawChart();
+    } else if(registros.length){
+      // primeira sincronização: sobe o que já existe localmente
+      for(const r of registros){
+        if(!r.fid){
+          try{ const ref = await db.collection('leituras').add(r); r.fid = ref.id; }
+          catch(e){ console.error(e); }
+        }
+      }
+      saveData(registros);
+    }
+    statusEl.textContent = 'Sincronizado com a nuvem.';
+  }catch(e){
+    console.error('Erro ao sincronizar leituras:', e);
+    statusEl.textContent = 'Falha ao conectar com a nuvem — usando dados salvos neste aparelho.';
+  }
+}
+
+syncCatalogFromCloud().then(()=>{
+  // Suporte a link direto vindo de visao_geral.html (?moinho=X&ponto=Y).
+  // select.value = X falha silenciosamente se o texto nao bater 100%
+  // (espaço a mais, maiúscula/minúscula) - por isso procuramos a opção
+  // por comparação tolerante em vez de atribuir direto.
+  function selecionarValorSelect(selectEl, valorAlvo){
+    const normaliza = (s)=> (s||'').trim().toLowerCase();
+    const alvo = normaliza(valorAlvo);
+    const opcao = [...selectEl.options].find(o=>normaliza(o.value)===alvo);
+    if(opcao){ selectEl.value = opcao.value; return true; }
+    return false;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const moinhoParam = params.get('moinho');
+  const pontoParam = params.get('ponto');
+  let moinhoAchado = true, pontoAchado = true;
+  if(moinhoParam) moinhoAchado = selecionarValorSelect(document.getElementById('moinho'), moinhoParam);
+  if(pontoParam) pontoAchado = selecionarValorSelect(document.getElementById('ponto'), pontoParam);
+  if(moinhoParam || pontoParam) updateGraphLabel();
+  if((moinhoParam && !moinhoAchado) || (pontoParam && !pontoAchado)){
+    document.getElementById('status').textContent =
+      `Aviso: "${!moinhoAchado ? moinhoParam : pontoParam}" do link não está cadastrado exatamente assim — mostrando a seleção padrão. Confira o nome na lista de cadastro acima.`;
+  }
+});
+syncLeiturasFromCloud();
+</script>
+</body>
+</html>

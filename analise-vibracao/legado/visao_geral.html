@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Visão Geral — Vibração</title>
+<style>
+  :root{
+    --bg:#12151a; --panel:#1b1f26; --panel2:#20252d; --line:#2a2f38;
+    --text:#e4e7eb; --dim:#8891a0; --accent:#3fa9f5;
+    --ok:#3fbf6f; --alerta:#e8a83f; --alarme:#e5504f; --stale:#5a6070;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:'Segoe UI',Roboto,Arial,sans-serif;-webkit-tap-highlight-color:transparent;}
+  header{padding:16px 16px 8px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;}
+  header h1{font-size:16px;margin:0 0 2px;letter-spacing:.3px;}
+  header p{margin:0;font-size:12px;color:var(--dim);}
+  header a{font-size:12px;color:var(--accent);text-decoration:none;}
+  main{padding:12px;max-width:900px;margin:0 auto;}
+  .resumo{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;}
+  .resumo .pill{flex:1;min-width:110px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;text-align:center;}
+  .resumo .pill .n{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;}
+  .resumo .pill .l{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.4px;margin-top:2px;}
+  .resumo .pill.ok .n{color:var(--ok);}
+  .resumo .pill.alerta .n{color:var(--alerta);}
+  .resumo .pill.alarme .n{color:var(--alarme);}
+  .resumo .pill.stale .n{color:var(--stale);}
+  .grupo{margin-bottom:22px;}
+  .grupo h2{font-size:13px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin:0 0 10px;padding-left:2px;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));gap:10px;}
+  .card{
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;
+    border-left:4px solid var(--stale); text-decoration:none; color:var(--text); display:block;
+    transition:transform .1s ease;
+  }
+  .card:active{transform:scale(0.98);}
+  .card.ok{border-left-color:var(--ok);}
+  .card.alerta{border-left-color:var(--alerta);}
+  .card.alarme{border-left-color:var(--alarme);}
+  .card.stale{border-left-color:var(--stale);opacity:.7;}
+  .card .ponto{font-size:14px;font-weight:600;margin-bottom:8px;}
+  .card .eixos{display:flex;gap:10px;margin-bottom:8px;}
+  .card .eixo{flex:1;text-align:center;background:var(--panel2);border-radius:6px;padding:6px 2px;}
+  .card .eixo .v{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;}
+  .card .eixo .k{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.3px;}
+  .card .rodape{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--dim);}
+  .tag{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;padding:2px 7px;border-radius:20px;}
+  .tag.ok{background:rgba(63,191,111,.15);color:var(--ok);}
+  .tag.alerta{background:rgba(232,168,63,.15);color:var(--alerta);}
+  .tag.alarme{background:rgba(229,80,79,.15);color:var(--alarme);}
+  .tag.stale{background:rgba(90,96,112,.25);color:var(--dim);}
+  .loading{text-align:center;color:var(--dim);font-size:13px;padding:40px 0;}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Visão Geral — Sensores de Vibração</h1>
+    <p id="subtitulo">Carregando…</p>
+  </div>
+  <a href="index.html">← Ver histórico detalhado</a>
+</header>
+
+<main>
+  <div class="resumo" id="resumo" style="display:none;">
+    <div class="pill ok"><div class="n" id="countOk">0</div><div class="l">OK</div></div>
+    <div class="pill alerta"><div class="n" id="countAlerta">0</div><div class="l">Alerta</div></div>
+    <div class="pill alarme"><div class="n" id="countAlarme">0</div><div class="l">Alarme</div></div>
+    <div class="pill stale"><div class="n" id="countStale">0</div><div class="l">Sem dados recentes</div></div>
+  </div>
+
+  <div id="conteudo"><div class="loading">Carregando leituras…</div></div>
+</main>
+
+<script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore-compat.js"></script>
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyAvfGsgnQRU3m35Pzd_7M-zg42tr4brz60",
+  authDomain: "analise-de-vibracao-fe8fc.firebaseapp.com",
+  projectId: "analise-de-vibracao-fe8fc",
+  storageBucket: "analise-de-vibracao-fe8fc.firebasestorage.app",
+  messagingSenderId: "1087450983979",
+  appId: "1:1087450983979:web:9ff238f8042623a9b5446e"
+};
+let db = null;
+try{
+  firebase.initializeApp(firebaseConfig);
+  db = firebase.firestore();
+}catch(e){
+  console.error('Erro ao iniciar Firebase:', e);
+}
+</script>
+<script>
+const ALERTA = 4.5, ALARME = 7.1;
+
+// Mesmo catalogo padrao do index.html - se o catalogo remoto (config/catalogo)
+// tiver listas diferentes, elas substituem estas abaixo.
+const MOINHOS_DEFAULT = ['501BM140','502BM140'];
+const PONTOS_DEFAULT = ['Mancal Motor LOA','Mancal Motor LA','Redutor entrada LOA','Redutor entrada LA','Rolamento pinhão LOA','Rolamento pinhão LA'];
+
+// Intervalo de envio do firmware (3h) - usado para decidir quando uma
+// leitura esta "obsoleta" (sensor pode estar offline/sem energia/sem Wi-Fi).
+// Tolerancia de 2.5x o intervalo antes de marcar como stale, para nao
+// disparar falso alarme por atraso pontual de rede.
+const SEND_INTERVAL_MS = 3 * 60 * 60 * 1000;
+const STALE_THRESHOLD_MS = SEND_INTERVAL_MS * 2.5;
+
+function tagStatus(valor){
+  if(valor === null || valor === undefined) return null;
+  if(valor >= ALARME) return 'alarme';
+  if(valor >= ALERTA) return 'alerta';
+  return 'ok';
+}
+
+function piorStatus(a, b){
+  const ordem = {alarme:3, alerta:2, ok:1};
+  if(!a) return b; if(!b) return a;
+  return ordem[a] >= ordem[b] ? a : b;
+}
+
+function formatarRelativo(ts){
+  if(!ts) return 'nunca';
+  const diffMs = Date.now() - ts;
+  const min = Math.floor(diffMs/60000);
+  if(min < 1) return 'agora mesmo';
+  if(min < 60) return `há ${min} min`;
+  const h = Math.floor(min/60);
+  if(h < 24) return `há ${h}h`;
+  const d = Math.floor(h/24);
+  return `há ${d}d`;
+}
+
+async function carregarCatalogo(){
+  if(!db) return { moinhos: MOINHOS_DEFAULT, pontos: PONTOS_DEFAULT };
+  try{
+    const doc = await db.collection('config').doc('catalogo').get();
+    if(doc.exists){
+      const data = doc.data();
+      return {
+        moinhos: (Array.isArray(data.moinhos) && data.moinhos.length) ? data.moinhos : MOINHOS_DEFAULT,
+        pontos: (Array.isArray(data.pontos) && data.pontos.length) ? data.pontos : PONTOS_DEFAULT,
+      };
+    }
+  }catch(e){ console.error('Erro ao buscar catálogo:', e); }
+  return { moinhos: MOINHOS_DEFAULT, pontos: PONTOS_DEFAULT };
+}
+
+async function carregarUltimasLeituras(){
+  // Busca um lote recente e reduz no cliente para "ultima leitura por
+  // moinho+ponto+eixo". Com 12 pontos x 3 eixos = 36 series e envio a
+  // cada 3h, um lote de 300 documentos cobre bastante margem de historico.
+  const mapa = {}; // chave "moinho|ponto|eixo" -> {valor, ts}
+  if(!db) return mapa;
+  try{
+    const snap = await db.collection('leituras').orderBy('ts','desc').limit(300).get();
+    snap.forEach(doc=>{
+      const d = doc.data();
+      const chave = `${d.moinho}|${d.ponto}|${d.eixo}`;
+      if(!mapa[chave]){ // primeira ocorrencia = mais recente (ja ordenado desc)
+        mapa[chave] = { valor: d.valor, ts: d.ts };
+      }
+    });
+  }catch(e){
+    console.error('Erro ao buscar leituras:', e);
+  }
+  return mapa;
+}
+
+function renderCard(moinho, ponto, leituras){
+  const chaveH = `${moinho}|${ponto}|Horizontal`;
+  const chaveV = `${moinho}|${ponto}|Vertical`;
+  const chaveA = `${moinho}|${ponto}|Axial`;
+
+  const H = leituras[chaveH], V = leituras[chaveV], A = leituras[chaveA];
+  const tsMaisRecente = Math.max(H?.ts||0, V?.ts||0, A?.ts||0) || null;
+
+  const stH = tagStatus(H?.valor), stV = tagStatus(V?.valor), stA = tagStatus(A?.valor);
+  let status = piorStatus(piorStatus(stH, stV), stA) || 'stale';
+
+  const semDadosAinda = !H && !V && !A;
+  const obsoleto = tsMaisRecente && (Date.now() - tsMaisRecente > STALE_THRESHOLD_MS);
+  if(semDadosAinda || obsoleto) status = 'stale';
+
+  const fmtV = (v)=> v!==undefined && v!==null ? v.toFixed(2) : '—';
+  const params = new URLSearchParams({ moinho, ponto });
+
+  const labelTag = { ok:'OK', alerta:'Alerta', alarme:'Alarme', stale: (semDadosAinda ? 'Sem dados' : 'Desatualizado') };
+
+  return `
+    <a class="card ${status}" href="index.html?${params.toString()}">
+      <div class="ponto">${ponto}</div>
+      <div class="eixos">
+        <div class="eixo"><div class="v">${fmtV(H?.valor)}</div><div class="k">H</div></div>
+        <div class="eixo"><div class="v">${fmtV(V?.valor)}</div><div class="k">V</div></div>
+        <div class="eixo"><div class="v">${fmtV(A?.valor)}</div><div class="k">A</div></div>
+      </div>
+      <div class="rodape">
+        <span>${formatarRelativo(tsMaisRecente)}</span>
+        <span class="tag ${status}">${labelTag[status]}</span>
+      </div>
+    </a>`;
+}
+
+async function montarPainel(){
+  const [{ moinhos, pontos }, leituras] = await Promise.all([carregarCatalogo(), carregarUltimasLeituras()]);
+
+  let countOk=0, countAlerta=0, countAlarme=0, countStale=0;
+  let html = '';
+
+  moinhos.forEach(moinho=>{
+    html += `<div class="grupo"><h2>${moinho}</h2><div class="grid">`;
+    pontos.forEach(ponto=>{
+      const cardHtml = renderCard(moinho, ponto, leituras);
+      html += cardHtml;
+      if(cardHtml.includes('card ok')) countOk++;
+      else if(cardHtml.includes('card alerta')) countAlerta++;
+      else if(cardHtml.includes('card alarme')) countAlarme++;
+      else countStale++;
+    });
+    html += `</div></div>`;
+  });
+
+  document.getElementById('conteudo').innerHTML = html || '<div class="loading">Nenhum ponto cadastrado no catálogo.</div>';
+  document.getElementById('countOk').textContent = countOk;
+  document.getElementById('countAlerta').textContent = countAlerta;
+  document.getElementById('countAlarme').textContent = countAlarme;
+  document.getElementById('countStale').textContent = countStale;
+  document.getElementById('resumo').style.display = 'flex';
+  document.getElementById('subtitulo').textContent =
+    `${moinhos.length * pontos.length} pontos monitorados · atualizado ${formatarRelativo(Date.now())}`;
+}
+
+montarPainel();
+// Atualiza sozinho a cada 2 minutos, sem precisar recarregar a pagina
+setInterval(montarPainel, 2 * 60 * 1000);
+</script>
+</body>
+</html>

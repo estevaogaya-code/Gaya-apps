@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Histórico — Vibração</title>
+<style>
+  :root{
+    --bg:#12151a; --panel:#1b1f26; --panel2:#20252d; --line:#2a2f38;
+    --text:#e4e7eb; --dim:#8891a0; --accent:#3fa9f5;
+    --ok:#3fbf6f; --alerta:#e8a83f; --alarme:#e5504f;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:'Segoe UI',Roboto,Arial,sans-serif;-webkit-tap-highlight-color:transparent;}
+  header{padding:16px 16px 8px;border-bottom:1px solid var(--line);}
+  header h1{font-size:16px;margin:0 0 2px;letter-spacing:.3px;}
+  header p{margin:0;font-size:12px;color:var(--dim);}
+  main{padding:12px;max-width:640px;margin:0 auto;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px;}
+  .row{display:flex;gap:8px;flex-wrap:wrap;}
+  select,button{font-size:14px;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text);}
+  select{flex:1;min-width:130px;}
+  button{cursor:pointer;font-weight:600;}
+  .label{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
+  .status{font-size:12px;color:var(--dim);text-align:center;margin-top:8px;min-height:16px;}
+  .hist{max-height:320px;overflow-y:auto;}
+  table{width:100%;border-collapse:collapse;font-size:12px;}
+  th,td{padding:6px 4px;text-align:left;border-bottom:1px solid var(--line);}
+  th{color:var(--dim);font-weight:600;}
+  td.v{font-variant-numeric:tabular-nums;}
+  .tag-ok{color:var(--ok);} .tag-alerta{color:var(--alerta);} .tag-alarme{color:var(--alarme);font-weight:700;}
+  canvas{width:100%;height:180px;display:block;}
+  .legend{display:flex;gap:14px;font-size:11px;color:var(--dim);margin-top:6px;flex-wrap:wrap;}
+  .legend span{display:inline-flex;align-items:center;gap:5px;}
+  .dot{width:8px;height:8px;border-radius:2px;display:inline-block;}
+  .warn{font-size:11px;color:var(--dim);line-height:1.5;background:var(--panel2);border-radius:8px;padding:10px;margin-top:4px;}
+  .small{font-size:12px;padding:8px 10px;}
+</style>
+</head>
+<body>
+<header>
+  <a href="index.html" style="font-size:12px;color:var(--accent);text-decoration:none;display:inline-block;margin-bottom:6px;">← Painel geral</a>
+  <h1>Vibração — Redutores 501BM140 / 502BM140</h1>
+  <p>Sensor fixo (ESP32-C3 + ADXL345) · leitura automática ISO 10816-3</p>
+  <p id="syncStatus" style="font-size:11px;color:var(--dim);margin-top:4px;">Conectando à nuvem…</p>
+</header>
+
+<main>
+  <div class="card">
+    <div class="label">Ponto de medição</div>
+    <div class="row">
+      <select id="sensor"><option value="">Carregando…</option></select>
+    </div>
+    <div class="status" id="status"></div>
+  </div>
+
+  <div class="card">
+    <div class="label">Histórico — <span id="graphPonto">—</span></div>
+    <div class="row" style="margin-bottom:8px;">
+      <select id="periodo">
+        <option value="7">Últimos 7 dias</option>
+        <option value="30" selected>Últimos 30 dias</option>
+        <option value="90">Últimos 90 dias</option>
+        <option value="all">Tudo</option>
+      </select>
+    </div>
+    <canvas id="chart"></canvas>
+    <div class="legend">
+      <span><span class="dot" style="background:#3fa9f5"></span>Horizontal</span>
+      <span><span class="dot" style="background:#3fbf6f"></span>Vertical</span>
+      <span><span class="dot" style="background:#c98be0"></span>Axial</span>
+      <span><span class="dot" style="background:#e8a83f"></span>Alerta 4,5</span>
+      <span><span class="dot" style="background:#e5504f"></span>Alarme 7,1</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="label">Medições do período</div>
+    <div class="hist">
+      <table>
+        <thead><tr><th>Data/hora</th><th>H</th><th>V</th><th>A</th><th>Ligada</th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div class="row" style="margin-top:10px;">
+      <button id="btnExport" class="small" style="flex:1;">Exportar CSV</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="label">Sobre este sensor</div>
+    <div class="warn">
+      Cada medição é a média das leituras RMS de velocidade (10–1000 Hz) de 12 horas de máquina ligada, amostradas a 200 Hz por um sensor fixo (ESP32-C3 + ADXL345). Data/hora = momento em que a nuvem recebeu a medição. Limiares ISO 10816-3: Alerta 4,5 mm/s, Alarme 7,1 mm/s.
+    </div>
+  </div>
+</main>
+
+<script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore-compat.js"></script>
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyAvfGsgnQRU3m35Pzd_7M-zg42tr4brz60",
+  authDomain: "analise-de-vibracao-fe8fc.firebaseapp.com",
+  projectId: "analise-de-vibracao-fe8fc",
+  storageBucket: "analise-de-vibracao-fe8fc.firebasestorage.app",
+  messagingSenderId: "1087450983979",
+  appId: "1:1087450983979:web:9ff238f8042623a9b5446e"
+};
+let db = null;
+try{
+  firebase.initializeApp(firebaseConfig);
+  db = firebase.firestore();
+}catch(e){
+  console.error('Erro ao iniciar Firebase:', e);
+}
+</script>
+<script>
+// Plataforma v2 - ver comentário no index.html sobre as coleções.
+const COL_SENSORES = 'v2_sensores';
+const COL_MEDICOES = 'v2_medicoes';
+const ALERTA = 4.5, ALARME = 7.1;
+
+let sensores = {};   // mac -> dados
+let medicoes = [];   // medições do sensor selecionado, ordem crescente de ts
+
+function esc(s){
+  return String(s ?? '').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function tsMillis(t){ return (t && typeof t.toMillis === 'function') ? t.toMillis() : null; }
+function nomeado(s){ return !!(s && s.moinho && s.ponto); }
+function rotuloSensor(mac){
+  const s = sensores[mac];
+  return nomeado(s) ? `${s.moinho} · ${s.ponto}` : `Sem nome · ${mac}`;
+}
+function tagClass(v){ return v>=ALARME ? 'tag-alarme' : v>=ALERTA ? 'tag-alerta' : 'tag-ok'; }
+const fmtV = (v)=> (typeof v === 'number') ? v.toFixed(2) : '—';
+
+function medicoesDoPeriodo(){
+  const periodo = document.getElementById('periodo').value;
+  if(periodo === 'all') return medicoes;
+  const corte = Date.now() - Number(periodo)*24*60*60*1000;
+  return medicoes.filter(m=>m.ts >= corte);
+}
+
+function renderTable(){
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = [...medicoesDoPeriodo()].reverse().map(m=>{
+    const d = new Date(m.ts);
+    return `<tr>
+      <td>${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</td>
+      <td class="v ${tagClass(m.h)}">${fmtV(m.h)}</td>
+      <td class="v ${tagClass(m.v)}">${fmtV(m.v)}</td>
+      <td class="v ${tagClass(m.a)}">${fmtV(m.a)}</td>
+      <td class="v">${typeof m.ligadoMin === 'number' ? (m.ligadoMin/60).toFixed(1)+' h' : '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function drawChart(){
+  const canvas = document.getElementById('chart');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio||1;
+  const w = canvas.clientWidth, h = 180;
+  canvas.width = w*dpr; canvas.height = h*dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,w,h);
+
+  const cores = {h:'#3fa9f5', v:'#3fbf6f', a:'#c98be0'};
+  const dados = medicoesDoPeriodo();
+
+  const padL=32, padR=8, padT=10, padB=26;
+  const todos = dados.flatMap(d=>[d.h, d.v, d.a]).filter(v=>typeof v === 'number');
+  const maxV = Math.max(ALARME*1.3, ...todos, 1);
+  const tsList = dados.map(d=>d.ts);
+  const minTs = tsList.length ? Math.min(...tsList) : Date.now()-1;
+  const maxTs = tsList.length ? Math.max(...tsList) : Date.now();
+  const spanTs = (maxTs - minTs) || 1;
+  const X = (ts)=> padL + (w-padL-padR) * (ts-minTs)/spanTs;
+  const Y = (v)=> padT + (h-padT-padB)*(1 - v/maxV);
+
+  ctx.strokeStyle = '#2a2f38'; ctx.fillStyle='#8891a0'; ctx.font='10px sans-serif';
+  [0, maxV/2, maxV].forEach(v=>{
+    const y = Y(v);
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(w-padR,y); ctx.stroke();
+    ctx.fillText(v.toFixed(1), 2, y+3);
+  });
+
+  if(dados.length){
+    const fmt = (ts)=> new Date(ts).toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'});
+    const y = h - 8;
+    ctx.textAlign = 'left'; ctx.fillText(fmt(minTs), X(minTs), y);
+    ctx.textAlign = 'center'; ctx.fillText(fmt(minTs + spanTs/2), X(minTs+spanTs/2), y);
+    ctx.textAlign = 'right'; ctx.fillText(fmt(maxTs), X(maxTs), y);
+    ctx.textAlign = 'left';
+  }
+
+  const limiar = (v, cor)=>{
+    const y=Y(v); ctx.strokeStyle=cor; ctx.setLineDash([4,4]);
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(w-padR,y); ctx.stroke();
+    ctx.setLineDash([]);
+  };
+  limiar(ALERTA, '#e8a83f'); limiar(ALARME, '#e5504f');
+
+  for(const campo of ['h','v','a']){
+    const pts = dados.filter(d=>typeof d[campo] === 'number');
+    if(pts.length===0) continue;
+    ctx.strokeStyle = cores[campo]; ctx.fillStyle = cores[campo]; ctx.lineWidth=2;
+    ctx.beginPath();
+    pts.forEach((p,i)=>{ const x = X(p.ts), y = Y(p[campo]); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+    ctx.stroke();
+    pts.forEach(p=>{ ctx.beginPath(); ctx.arc(X(p.ts), Y(p[campo]), 2.5, 0, 7); ctx.fill(); });
+  }
+
+  if(dados.length===0){
+    ctx.fillStyle='#8891a0'; ctx.font='12px sans-serif';
+    ctx.fillText('Sem medições neste período para este ponto.', padL, h/2);
+  }
+}
+
+function render(){
+  const mac = document.getElementById('sensor').value;
+  document.getElementById('graphPonto').textContent = mac ? rotuloSensor(mac) : '—';
+  drawChart();
+  renderTable();
+}
+
+async function carregarMedicoes(mac){
+  medicoes = [];
+  const statusEl = document.getElementById('status');
+  if(!mac){ render(); return; }
+  statusEl.textContent = 'Carregando medições…';
+  try{
+    // Só filtro de igualdade (índice automático); ordenação feita aqui.
+    const snap = await db.collection(COL_MEDICOES).where('mac','==',mac).get();
+    snap.forEach(doc=>{
+      const d = doc.data();
+      const ts = tsMillis(d.ts);
+      if(ts) medicoes.push({ ts, h: d.h, v: d.v, a: d.a, ligadoMin: d.ligadoMin });
+    });
+    medicoes.sort((a,b)=>a.ts-b.ts);
+    statusEl.textContent = `${medicoes.length} medição(ões) no total · MAC ${mac}`;
+  }catch(e){
+    console.error('Erro ao buscar medições:', e);
+    statusEl.textContent = 'Erro ao buscar medições — veja o console.';
+  }
+  render();
+}
+
+async function iniciar(){
+  const syncEl = document.getElementById('syncStatus');
+  const select = document.getElementById('sensor');
+  if(!db){ syncEl.textContent = 'Sem conexão com a nuvem.'; return; }
+  try{
+    const snap = await db.collection(COL_SENSORES).get();
+    snap.forEach(doc=>{ sensores[doc.id] = doc.data(); });
+    syncEl.textContent = 'Sincronizado com a nuvem.';
+  }catch(e){
+    console.error('Erro ao buscar sensores:', e);
+    syncEl.textContent = 'Falha ao conectar com a nuvem.';
+    return;
+  }
+
+  const macParam = new URLSearchParams(window.location.search).get('mac');
+  // Ocultos só aparecem se vierem pelo link direto.
+  const macs = Object.keys(sensores)
+    .filter(mac => !sensores[mac].oculto || mac === macParam)
+    .sort((a,b)=> rotuloSensor(a).localeCompare(rotuloSensor(b), 'pt-BR'));
+
+  select.innerHTML = macs.length
+    ? macs.map(mac=>`<option value="${esc(mac)}">${esc(rotuloSensor(mac))}</option>`).join('')
+    : '<option value="">Nenhum sensor registrado</option>';
+  if(macParam && macs.includes(macParam)) select.value = macParam;
+
+  await carregarMedicoes(select.value);
+}
+
+document.getElementById('sensor').addEventListener('change', (e)=> carregarMedicoes(e.target.value));
+document.getElementById('periodo').addEventListener('change', render);
+window.addEventListener('resize', drawChart);
+
+document.getElementById('btnExport').addEventListener('click', ()=>{
+  const mac = document.getElementById('sensor').value;
+  if(!mac) return;
+  const s = sensores[mac] || {};
+  const linhas = [['data_hora','moinho','ponto','mac','h_mm_s','v_mm_s','a_mm_s','horas_ligada']];
+  medicoesDoPeriodo().forEach(m=>{
+    linhas.push([new Date(m.ts).toISOString(), s.moinho||'', s.ponto||'', mac,
+      fmtV(m.h), fmtV(m.v), fmtV(m.a), typeof m.ligadoMin === 'number' ? (m.ligadoMin/60).toFixed(1) : '']);
+  });
+  const csv = linhas.map(l=>l.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(';')).join('\n');
+  const blob = new Blob(['﻿' + csv], {type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `vibracao_${(s.moinho||'')}_${(s.ponto||mac)}.csv`.replace(/\s+/g,'_');
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+render();
+iniciar();
+</script>
+</body>
+</html>

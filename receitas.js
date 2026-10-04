@@ -520,11 +520,21 @@ function criarReceitas(opts) {
     const lidos = {};
     try { for (const i of mudar) lidos[i] = await lerNome(PLC, L, i); }
     catch (e) { registrarLog({ ...log, resultado: 'falha_leitura' }); throw e; }
-    const conflitos = mudar.filter(i => lidos[i].texto !== anterior[i]);
+    // Conflito só se o nome mudou de verdade. A tela mostra o cache do server.js,
+    // que monta o texto com o DATA inteiro (sem olhar o LEN); aqui a leitura é
+    // pelo LEN. Quando LEN e DATA não batem (ex.: LEN 0 com texto antigo no
+    // DATA), os dois diferem para sempre — então vale o que a tela mostrava
+    // se ainda é o que está no cache.
+    const cache = atuais.map(x => String(x || '').trim());
+    const conflitos = mudar.filter(i => lidos[i].texto !== anterior[i] && cache[i] !== anterior[i]);
+    const detalhes = mudar.filter(i => lidos[i].texto !== anterior[i])
+      .map(i => ({ componente: i + 1, tela: anterior[i], clp: lidos[i].texto, len: lidos[i].len, cache: cache[i] }));
+    if (detalhes.length) log.leituraClp = detalhes;
     if (conflitos.length) {
       conflitos.forEach(i => { atuais[i] = lidos[i].texto; });
       registrarLog({ ...log, resultado: 'conflito' });
-      throw erroHttp(409, 'conflito', { nomes: atuais, mensagem: 'O nome no CLP mudou desde que a tela foi carregada (alguém alterou). Recarregue e confira.' });
+      throw erroHttp(409, 'conflito', { nomes: atuais, detalhes: detalhes.filter(d => conflitos.includes(d.componente - 1)),
+        mensagem: 'O nome no CLP mudou desde que a tela foi carregada (alguém alterou). Recarregue e confira.' });
     }
     if (job.cancelado) {
       registrarLog({ ...log, resultado: 'timeout_nao_executado' });

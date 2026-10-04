@@ -608,7 +608,8 @@
     }
     if (r.status === 409 || r.status === 502){
       if (c.nomes) { dados.linhas[L].nomes = c.nomes; render(); }
-      var det = (c.divergencias || []).map(function(x){ return 'Comp. ' + x.componente + ': esperado "' + x.esperado + '", lido "' + x.lido + '"'; }).join('<br>');
+      var det = (c.divergencias || []).map(function(x){ return 'Comp. ' + esc(x.componente) + ': esperado "' + esc(x.esperado) + '", lido "' + esc(x.lido) + '"'; })
+        .concat((c.detalhes || []).map(function(x){ return 'Comp. ' + esc(x.componente) + ': tela "' + esc(x.tela) + '", CLP "' + esc(x.clp) + '" (LEN ' + esc(x.len) + ')'; })).join('<br>');
       abrirModal(r.status === 409 ? 'Nome alterado por outra pessoa' : 'Gravação não confirmada',
         '<div class="aviso ' + (r.status === 409 ? 'warn' : 'bad') + '">' + esc(c.mensagem) + '</div>' + (det ? '<div class="aviso bad">' + det + '</div>' : '') +
         (c.erroEscrita ? '<div class="aviso bad">Erro de escrita: ' + esc(c.erroEscrita) + '</div>' : '') + ok);

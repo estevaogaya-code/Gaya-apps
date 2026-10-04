@@ -587,7 +587,8 @@ test('nomes: validação (400), conflito (409), divergência (502), liberado dur
     assert.equal(r.status, 401);
     assert.equal(t.plc.escritas.length, 0);
 
-    setNome(t.plc.mem, '501', 2, 'AMBAR'); // alguém trocou pelo supervisório
+    setNome(t.plc.mem, '501', 2, 'AMBAR'); // alguém trocou pelo supervisório (e o cache de 30 s já leu)
+    t.cache.nomes = { ...t.cache.nomes, 501: ['BRASKEM', 'AMBAR', '', '', '', '', '', '', ''] };
     r = await t.req('POST', '/api/receitas/501/nomes', corpoN(['BRASKEM', 'PAMPA2', '', '', '', '', '', '', '']));
     assert.equal(r.status, 409); assert.equal(r.corpo.erro, 'conflito'); assert.equal(r.corpo.nomes[1], 'AMBAR');
     assert.equal(t.plc.escritas.length, 0);
@@ -624,5 +625,36 @@ test('nomes: zera lixo no DATA além do LEN antigo', async () => {
     const r = await t.req('POST', '/api/receitas/501/nomes', corpoN(['BRASKEM', 'AMB', '', '', '', '', '', '', '']));
     assert.equal(r.status, 200, JSON.stringify(r.corpo));
     for (let k = 3; k < 82; k++) assert.equal(t.plc.mem[`NOME_PRODUTO02_501.DATA[${k}]`], 0, `DATA[${k}]`);
+  } finally { await t.fechar(); }
+});
+
+test('nomes: LEN 0 com texto antigo no DATA (cache mostra o texto) não dá conflito', async () => {
+  const t = await montar();
+  try {
+    await sleep(30);
+    // CLP: comp. 5 da 502 com LEN 0 e "BRASKEM" no DATA; o cache do server.js mostra "BRASKEM"
+    setNome(t.plc.mem, '502', 5, 'BRASKEM', 0);
+    t.cache.nomes = { ...t.cache.nomes, 502: ['', '', '', '', 'BRASKEM', '', '', '', ''] };
+    const ant = ['', '', '', '', 'BRASKEM', '', '', '', ''];
+    const r = await t.req('POST', '/api/receitas/502/nomes', { usuario: 'T', nomes: ['ESCORIA', '', '', '', '', '', '', '', ''], anterior: ant });
+    assert.equal(r.status, 200, JSON.stringify(r.corpo));
+    assert.equal(t.plc.mem['NOME_PRODUTO05_502.DATA[0]'], 0, 'DATA zerado');
+    assert.equal(lerNomeMem(t.plc.mem, '502', 1), 'ESCORIA');
+    await t.r._aguardarArquivos();
+    const ult = t.log().pop();
+    assert.equal(ult.resultado, 'ok');
+    assert.deepEqual(ult.leituraClp, [{ componente: 5, tela: 'BRASKEM', clp: '', len: 0, cache: 'BRASKEM' }]);
+  } finally { await t.fechar(); }
+});
+
+test('nomes: conflito real (cache e CLP diferentes da tela) traz o detalhe', async () => {
+  const t = await montar();
+  try {
+    await sleep(30);
+    setNome(t.plc.mem, '501', 2, 'AMBAR');
+    t.cache.nomes = { ...t.cache.nomes, 501: ['BRASKEM', 'AMBAR', '', '', '', '', '', '', ''] };
+    const r = await t.req('POST', '/api/receitas/501/nomes', corpoN(['BRASKEM', 'X', '', '', '', '', '', '', '']));
+    assert.equal(r.status, 409);
+    assert.deepEqual(r.corpo.detalhes, [{ componente: 2, tela: 'PAMPA', clp: 'AMBAR', len: 5, cache: 'AMBAR' }]);
   } finally { await t.fechar(); }
 });

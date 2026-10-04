@@ -27,16 +27,35 @@
    - 3 servos via PWM direto por GPIO (ESP32Servo): yaw (cabeca), olho
      esquerdo, olho direito.
    - 1 sensor ultrassonico HC-SR04 (frontal)
-   - LED do olho (liga/desliga, sem PWM - ver aviso no digitalWrite abaixo)
-   - Ao detectar alvo a menos de DETECT_RANGE_CM: dispara uma coreografia
-     (olhos vao abruptamente para um lado -> pausa -> cabeca vai para o
-     mesmo lado ate completar o curso -> pausa -> cabeca e olhos voltam
-     juntos ao centro -> pausa -> repete para o lado oposto -> fica ocioso
-     ate novo disparo). Toda a sequencia e cronometrada por millis() (sem
-     delay() no loop). Ao final, os servos sao desenergizados (detach) - o
-     mecanismo sustenta a posicao central de repouso sem consumo continuo.
-     Se o seu mecanismo NAO segurar sozinho a posicao central, remova a
-     chamada a releaseServos() no fim de updateSequence().
+   - LED do olho, agora com PWM real (LEDC) em vez de liga/desliga:
+       * Repouso: "respira" entre 10% e 30% de brilho, ciclo triangular de
+         ida e volta em 4s (EYE_PULSE_PERIOD_MS).
+       * Ao detectar alvo: rampa suave do brilho atual até 100% em 3s
+         (LED_RAMP_TO_FULL_MS), permanece em 100% durante toda a coreografia,
+         e volta a "respirar" quando a coreografia termina.
+   - Ao detectar alvo a menos de DETECT_RANGE_CM: dispara uma coreografia de
+     4 trechos (ver updateSequence()/seqStart() abaixo):
+       1) centro -> lado A
+       2) lado A -> centro
+       3) centro -> lado B (oposto ao lado A)
+       4) lado B -> centro -> fica ocioso ate novo disparo
+     Em CADA trecho: os olhos saltam abruptamente para o angulo que vai
+     coincidir com o destino da cabeca (ou permanecem no centro, se o
+     destino do trecho for o centro) -> pausa de 3s com a cabeca ainda na
+     posicao anterior -> a cabeca entao comeca a girar em rampa (1/4 da
+     velocidade de referencia dos olhos) RUMO ao destino, enquanto os olhos,
+     na MESMA velocidade, giram em sentido contrario (saem do salto abrupto
+     e voltam ao centro do proprio curso) -> ao fim do trecho, cabeca e
+     olhos terminam alinhados (cabeca apontando pro lado, olhos centrados na
+     orbita = olhar efetivamente na direcao da cabeca) -> pausa de 3s antes
+     do proximo trecho. Isso substitui o comportamento antigo, em que os
+     olhos ficavam "colados" no canto ate a cabeca terminar de girar,
+     desalinhando o olhar durante toda a rampa da cabeca.
+     Toda a sequencia e cronometrada por millis() (sem delay() no loop). Ao
+     final, os servos sao desenergizados (detach) - o mecanismo sustenta a
+     posicao central de repouso sem consumo continuo. Se o seu mecanismo NAO
+     segurar sozinho a posicao central, remova a chamada a releaseServos()
+     no fim de updateSequence().
 
    ATENCAO - AVISOS IMPORTANTES ANTES DE LIGAR:
    1) SERVOS: fio de sinal no GPIO do ESP32-C3, alimentacao (+V/GND) na
@@ -72,7 +91,7 @@
 #define PIN_HCSR04_TRIG   3   // saida direta do ESP32 (3,3V) - ok sem protecao
 #define PIN_HCSR04_ECHO   10  // ENTRADA - usar divisor de tensao 5V->3,3V (ver aviso acima)
 
-#define PIN_EYE_LED       0   // LED do olho (liga/desliga)
+#define PIN_EYE_LED       0   // LED do olho (PWM via LEDC)
 
 // GPIO 6 (antigo PIN_SERVO_PITCH) fica livre, sem uso.
 
@@ -117,35 +136,41 @@ const int servoPins[NUM_SERVOS] = { PIN_SERVO_YAW, PIN_SERVO_EYE_L, PIN_SERVO_EY
 // ---------------------------------------------------------------------------
 #define DETECT_RANGE_CM   80
 
-// Coreografia disparada pelo sensor (nao-bloqueante, controlada por millis()):
-//   1) olhos vao abruptamente para um lado
-//   2) pausa
-//   3) cabeca (yaw) vai para o MESMO lado ate completar o curso
-//   4) pausa (parado no extremo)
-//   5) cabeca e olhos voltam JUNTOS ao centro
-//   6) pausa (parado no centro)
-//   7) repete o mesmo ciclo (1-6) para o lado OPOSTO
-//   8) ao voltar ao centro pela 2a vez, fica ocioso ate novo disparo do sensor
-#define SEQ_EYE_TO_HEAD_PAUSE_MS   2000UL  // pausa entre olhos e cabeca
-#define SEQ_HEAD_HOLD_PAUSE_MS     3000UL  // pausa parado no extremo
-#define SEQ_CENTER_PAUSE_MS        3000UL  // pausa parado no centro
-
-// Pequena pausa tecnica (nao e parte da coreografia) entre comandar os olhos
-// de volta ao centro e iniciar a rampa do YAW - evita comandar os 2 olhos e
-// o YAW praticamente no mesmo instante, no caso de isso pesar na fonte
-// compartilhada dos 3 servos.
-#define SEQ_RETURN_STAGGER_MS      250UL
+// Coreografia disparada pelo sensor - ver descricao completa no cabecalho do
+// arquivo. 4 trechos: centro->ladoA, ladoA->centro, centro->ladoB,
+// ladoB->centro. Em cada trecho: olhos saltam abruptamente para o angulo de
+// destino -> pausa (cabeca ainda parada) -> cabeca rampa pro destino ENQUANTO
+// olhos rampam de volta ao centro, na MESMA velocidade -> pausa -> proximo
+// trecho.
+#define SEQ_PRE_MOVE_PAUSE_MS    3000UL  // pausa antes de a cabeca comecar a girar
+#define SEQ_POST_MOVE_PAUSE_MS   3000UL  // pausa parado, ao final de cada trecho
 
 // Velocidade angular da cabeca (YAW), em graus/segundo. Os olhos sao servos
-// leves e vao no proprio limite mecanico deles ao receber o comando (~500-600
-// graus/s, valor tipico de datasheet de micro servo tipo MG90S sem carga) -
-// isso NAO e controlado por firmware, e o quanto o servo consegue fisicamente.
-// A cabeca (YAW) e comandada em rampa por software para ficar em 1/4 dessa
-// velocidade de referencia. Se na pratica os olhos parecerem mais rapidos ou
-// mais lentos que isso, ajuste EYE_REF_SPEED_DPS e HEAD_SPEED_DPS recalcula
-// sozinho a partir dele.
+// leves e vao no proprio limite mecanico deles ao receber um comando direto
+// (~500-600 graus/s, valor tipico de datasheet de micro servo tipo MG90S sem
+// carga) - isso NAO e controlado por firmware, e o quanto o servo consegue
+// fisicamente nos saltos abruptos. Durante a rampa de retorno ao centro,
+// porem, os olhos sao deliberadamente limitados a essa MESMA velocidade da
+// cabeca (1/4 da referencia), para terminarem alinhados com ela.
 #define EYE_REF_SPEED_DPS   550.0f
 #define HEAD_SPEED_DPS      (EYE_REF_SPEED_DPS / 4.0f)
+
+// ---------------------------------------------------------------------------
+// LED DO OLHO - "respiracao" em repouso + rampa para 100% quando acionado
+// ---------------------------------------------------------------------------
+#define LED_PWM_FREQ_HZ      5000
+#define LED_PWM_RES_BITS     8      // 0-255
+
+#define EYE_PULSE_MIN_PCT    10
+#define EYE_PULSE_MAX_PCT    30
+#define EYE_PULSE_PERIOD_MS  4000UL  // ciclo completo de ida e volta (respiracao)
+
+#define LED_RAMP_TO_FULL_MS  3000UL  // rampa do brilho atual até 100% ao detectar alvo
+
+enum LedState { LED_IDLE_PULSE, LED_RAMP_TO_FULL, LED_FULL };
+LedState ledState = LED_IDLE_PULSE;
+unsigned long ledRampStartMs = 0;
+uint8_t ledRampFromPct = EYE_PULSE_MIN_PCT;
 
 // ---------------------------------------------------------------------------
 // ESTADO GLOBAL
@@ -154,25 +179,25 @@ volatile int posYaw   = YAW_CENTER;
 volatile int posEyeL  = EYE_L_CENTER;
 volatile int posEyeR  = EYE_R_CENTER;
 
-// Maquina de estados da coreografia disparada pelo sensor (ver comentario
-// acima de SEQ_EYE_TO_HEAD_PAUSE_MS). Tudo cronometrado por millis(), sem
-// nenhum delay() dentro do loop().
+// Maquina de estados da coreografia disparada pelo sensor (ver descricao no
+// cabecalho do arquivo). Tudo cronometrado por millis(), sem delay() no
+// loop(). 4 trechos (legIndex 0..3), cada um com seu angulo de destino para
+// a cabeca e para os olhos, calculados em seqStart().
 enum SeqState {
   SEQ_IDLE,
-  SEQ_EYES_TO_SIDE,
-  SEQ_WAIT_BEFORE_HEAD,
-  SEQ_HEAD_TO_SIDE,
-  SEQ_HEAD_MOVING_TO_SIDE,
-  SEQ_WAIT_AT_EXTREME,
-  SEQ_RETURN_CENTER,
-  SEQ_WAIT_BEFORE_HEAD_RETURN,
-  SEQ_HEAD_MOVING_TO_CENTER,
-  SEQ_WAIT_AT_CENTER
+  SEQ_EYES_ABRUPT,       // olhos saltam abruptamente para o destino do trecho
+  SEQ_WAIT_BEFORE_MOVE,  // pausa com a cabeca ainda parada
+  SEQ_MOVING,            // cabeca rampa pro destino, olhos rampam de volta ao centro
+  SEQ_WAIT_AFTER_MOVE    // pausa parado, ao final do trecho
 };
 SeqState seqState = SEQ_IDLE;
 unsigned long seqTimerMs = 0;
-int  seqDir  = 1;   // +1 ou -1: para qual lado vai nesta passada
-int  seqPass = 0;   // 0 = primeira direcao, 1 = segunda direcao (oposta)
+
+#define NUM_LEGS 4
+int legYaw[NUM_LEGS];
+int legEyeL[NUM_LEGS];
+int legEyeR[NUM_LEGS];
+int legIndex = 0;
 
 // Rampa nao-bloqueante do YAW (cabeca), usada para limitar a velocidade dela
 // a HEAD_SPEED_DPS sem travar o loop() - ver startYawRamp()/updateYawRamp().
@@ -181,6 +206,14 @@ int  yawRampFromAngle = YAW_CENTER;
 int  yawRampToAngle   = YAW_CENTER;
 unsigned long yawRampStartMs   = 0;
 unsigned long yawRampDurationMs = 0;
+
+// Rampa nao-bloqueante dos olhos de volta ao centro, na MESMA velocidade da
+// cabeca (HEAD_SPEED_DPS) - ver startEyeRampToCenter()/updateEyeRamp().
+bool eyeRampActive = false;
+int  eyeRampFromL = EYE_L_CENTER, eyeRampToL = EYE_L_CENTER;
+int  eyeRampFromR = EYE_R_CENTER, eyeRampToR = EYE_R_CENTER;
+unsigned long eyeRampStartMs    = 0;
+unsigned long eyeRampDurationMs = 0;
 
 // Controla o intervalo entre checagens do sensor ultrassonico. Sem isso, o
 // loop() chamaria pulseIn() (que trava ate 25ms esperando eco) em TODA
@@ -231,14 +264,50 @@ void servosToCenter() {
 }
 
 // ---------------------------------------------------------------------------
+// LED DO OLHO - ver enum LedState acima
+// ---------------------------------------------------------------------------
+uint8_t computeIdlePulsePct(unsigned long now) {
+  unsigned long phase = now % EYE_PULSE_PERIOD_MS;
+  unsigned long half  = EYE_PULSE_PERIOD_MS / 2;
+  if (phase < half) {
+    return (uint8_t)map(phase, 0, half, EYE_PULSE_MIN_PCT, EYE_PULSE_MAX_PCT);
+  }
+  return (uint8_t)map(phase - half, 0, half, EYE_PULSE_MAX_PCT, EYE_PULSE_MIN_PCT);
+}
+
+void ledStartRampToFull() {
+  ledRampFromPct = computeIdlePulsePct(millis());
+  ledRampStartMs = millis();
+  ledState = LED_RAMP_TO_FULL;
+}
+
+void ledReturnToIdlePulse() {
+  ledState = LED_IDLE_PULSE;
+}
+
+// Chamar em toda passagem do loop(), independente do estado da coreografia.
+void updateEyeLed() {
+  unsigned long now = millis();
+  uint8_t pct;
+  if (ledState == LED_RAMP_TO_FULL) {
+    unsigned long elapsed = now - ledRampStartMs;
+    if (elapsed >= LED_RAMP_TO_FULL_MS) {
+      pct = 100;
+      ledState = LED_FULL;
+    } else {
+      pct = (uint8_t)map(elapsed, 0, LED_RAMP_TO_FULL_MS, ledRampFromPct, 100);
+    }
+  } else if (ledState == LED_FULL) {
+    pct = 100;
+  } else {
+    pct = computeIdlePulsePct(now);
+  }
+  ledcWrite(PIN_EYE_LED, (uint8_t)((uint16_t)pct * 255 / 100));
+}
+
+// ---------------------------------------------------------------------------
 // COREOGRAFIA DE MOVIMENTO (disparada pelo sensor) - ver enum SeqState acima
 // ---------------------------------------------------------------------------
-void seqSetEyesToSide(int dir) {
-  posEyeL = (dir > 0) ? EYE_L_MAX : EYE_L_MIN;
-  posEyeR = (dir > 0) ? EYE_R_MAX : EYE_R_MIN;
-  setServoAngle(IDX_EYE_L, posEyeL);
-  setServoAngle(IDX_EYE_R, posEyeR);
-}
 
 // Inicia uma rampa nao-bloqueante do YAW ate targetAngle, na velocidade
 // HEAD_SPEED_DPS. Chamar updateYawRamp() em toda passagem do loop() ate ela
@@ -269,89 +338,115 @@ bool updateYawRamp() {
   return false;
 }
 
+// Inicia uma rampa nao-bloqueante dos dois olhos de volta ao proprio centro,
+// na mesma velocidade angular da cabeca (HEAD_SPEED_DPS) - e o que faz os
+// olhos "destorcerem" da posicao abrupta exatamente enquanto a cabeca gira,
+// terminando alinhados com ela.
+void startEyeRampToCenter() {
+  eyeRampFromL = posEyeL; eyeRampToL = EYE_L_CENTER;
+  eyeRampFromR = posEyeR; eyeRampToR = EYE_R_CENTER;
+  int deltaDeg = max(abs(eyeRampToL - eyeRampFromL), abs(eyeRampToR - eyeRampFromR));
+  eyeRampDurationMs = (unsigned long)((deltaDeg / HEAD_SPEED_DPS) * 1000.0f);
+  if (eyeRampDurationMs < 1) eyeRampDurationMs = 1;
+  eyeRampStartMs = millis();
+  eyeRampActive = true;
+}
+
+// Retorna true quando a rampa termina (e ja deixa os olhos exatamente no centro).
+bool updateEyeRamp() {
+  if (!eyeRampActive) return true;
+  unsigned long elapsed = millis() - eyeRampStartMs;
+  if (elapsed >= eyeRampDurationMs) {
+    posEyeL = eyeRampToL; posEyeR = eyeRampToR;
+    setServoAngle(IDX_EYE_L, posEyeL);
+    setServoAngle(IDX_EYE_R, posEyeR);
+    eyeRampActive = false;
+    return true;
+  }
+  float frac = (float)elapsed / (float)eyeRampDurationMs;
+  posEyeL = eyeRampFromL + (int)((eyeRampToL - eyeRampFromL) * frac);
+  posEyeR = eyeRampFromR + (int)((eyeRampToR - eyeRampFromR) * frac);
+  setServoAngle(IDX_EYE_L, posEyeL);
+  setServoAngle(IDX_EYE_R, posEyeR);
+  return false;
+}
+
+// Monta os 4 trechos da coreografia (centro->ladoA, ladoA->centro,
+// centro->ladoB, ladoB->centro), mantendo as mesmas direcoes/limites ja
+// usados na coreografia anterior - so a forma de percorrer cada trecho mudou.
 void seqStart() {
-  seqDir  = 1;
-  seqPass = 0;
-  seqState = SEQ_EYES_TO_SIDE;
+  int dir = 1;  // lado inicial - mesma convencao de sempre (YAW_MAX/EYE_MAX primeiro)
+
+  legYaw[0]  = (dir > 0) ? YAW_MAX   : YAW_MIN;
+  legEyeL[0] = (dir > 0) ? EYE_L_MAX : EYE_L_MIN;
+  legEyeR[0] = (dir > 0) ? EYE_R_MAX : EYE_R_MIN;
+
+  legYaw[1]  = YAW_CENTER;
+  legEyeL[1] = EYE_L_CENTER;
+  legEyeR[1] = EYE_R_CENTER;
+
+  legYaw[2]  = (dir > 0) ? YAW_MIN   : YAW_MAX;
+  legEyeL[2] = (dir > 0) ? EYE_L_MIN : EYE_L_MAX;
+  legEyeR[2] = (dir > 0) ? EYE_R_MIN : EYE_R_MAX;
+
+  legYaw[3]  = YAW_CENTER;
+  legEyeL[3] = EYE_L_CENTER;
+  legEyeR[3] = EYE_R_CENTER;
+
+  legIndex = 0;
+  seqState = SEQ_EYES_ABRUPT;
+  ledStartRampToFull();
   Serial.println("Alvo detectado - iniciando sequencia de movimento");
 }
 
 // Chamada em toda passagem do loop() enquanto seqState != SEQ_IDLE. So faz
-// alguma coisa quando o tempo da pausa atual termina - nunca bloqueia.
+// alguma coisa quando o tempo da pausa atual termina, ou quando as rampas em
+// andamento terminam - nunca bloqueia.
 void updateSequence() {
   unsigned long now = millis();
   switch (seqState) {
 
-    case SEQ_EYES_TO_SIDE:
-      seqSetEyesToSide(seqDir);
-      digitalWrite(PIN_EYE_LED, HIGH);
-      seqTimerMs = now;
-      seqState = SEQ_WAIT_BEFORE_HEAD;
-      break;
-
-    case SEQ_WAIT_BEFORE_HEAD:
-      if (now - seqTimerMs >= SEQ_EYE_TO_HEAD_PAUSE_MS) {
-        seqState = SEQ_HEAD_TO_SIDE;
-      }
-      break;
-
-    case SEQ_HEAD_TO_SIDE:
-      // olhos ja estao no lado (feito em SEQ_EYES_TO_SIDE); a cabeca agora
-      // faz o mesmo percurso, mas em rampa, a 1/4 da velocidade dos olhos.
-      startYawRamp((seqDir > 0) ? YAW_MAX : YAW_MIN);
-      seqState = SEQ_HEAD_MOVING_TO_SIDE;
-      break;
-
-    case SEQ_HEAD_MOVING_TO_SIDE:
-      if (updateYawRamp()) {
-        seqTimerMs = now;
-        seqState = SEQ_WAIT_AT_EXTREME;
-      }
-      break;
-
-    case SEQ_WAIT_AT_EXTREME:
-      if (now - seqTimerMs >= SEQ_HEAD_HOLD_PAUSE_MS) {
-        seqState = SEQ_RETURN_CENTER;
-      }
-      break;
-
-    case SEQ_RETURN_CENTER:
-      // olhos voltam ao centro na hora (mesmo criterio de "abruptamente").
-      posEyeL = EYE_L_CENTER;
-      posEyeR = EYE_R_CENTER;
+    case SEQ_EYES_ABRUPT:
+      // olhos saltam direto para o angulo que vai coincidir com o destino
+      // deste trecho (ou ficam no centro, se o destino for o centro).
+      posEyeL = legEyeL[legIndex];
+      posEyeR = legEyeR[legIndex];
       setServoAngle(IDX_EYE_L, posEyeL);
       setServoAngle(IDX_EYE_R, posEyeR);
       seqTimerMs = now;
-      seqState = SEQ_WAIT_BEFORE_HEAD_RETURN;
+      seqState = SEQ_WAIT_BEFORE_MOVE;
       break;
 
-    case SEQ_WAIT_BEFORE_HEAD_RETURN:
-      // pequena pausa tecnica antes de iniciar a rampa do YAW (ver
-      // SEQ_RETURN_STAGGER_MS acima) - so entao a cabeca comeca a rampa de
-      // volta ao centro, tambem a 1/4 da velocidade dos olhos.
-      if (now - seqTimerMs >= SEQ_RETURN_STAGGER_MS) {
-        startYawRamp(YAW_CENTER);
-        seqState = SEQ_HEAD_MOVING_TO_CENTER;
+    case SEQ_WAIT_BEFORE_MOVE:
+      if (now - seqTimerMs >= SEQ_PRE_MOVE_PAUSE_MS) {
+        // cabeca comeca a rampa pro destino do trecho, e os olhos comecam a
+        // rampa de volta ao proprio centro, ao MESMO TEMPO e na MESMA
+        // velocidade - e isso que mantem olhos e cabeca alinhados durante
+        // todo o giro, em vez de ficarem "colados" no canto.
+        startYawRamp(legYaw[legIndex]);
+        startEyeRampToCenter();
+        seqState = SEQ_MOVING;
       }
       break;
 
-    case SEQ_HEAD_MOVING_TO_CENTER:
-      if (updateYawRamp()) {
+    case SEQ_MOVING: {
+      bool yawDone  = updateYawRamp();
+      bool eyesDone = updateEyeRamp();
+      if (yawDone && eyesDone) {
         seqTimerMs = now;
-        seqState = SEQ_WAIT_AT_CENTER;
+        seqState = SEQ_WAIT_AFTER_MOVE;
       }
       break;
+    }
 
-    case SEQ_WAIT_AT_CENTER:
-      if (now - seqTimerMs >= SEQ_CENTER_PAUSE_MS) {
-        if (seqPass == 0) {
-          // repete o mesmo ciclo para o lado oposto
-          seqPass = 1;
-          seqDir  = -seqDir;
-          seqState = SEQ_EYES_TO_SIDE;
+    case SEQ_WAIT_AFTER_MOVE:
+      if (now - seqTimerMs >= SEQ_POST_MOVE_PAUSE_MS) {
+        legIndex++;
+        if (legIndex < NUM_LEGS) {
+          seqState = SEQ_EYES_ABRUPT;
         } else {
-          // as duas direcoes concluidas - encerra e aguarda novo disparo
-          digitalWrite(PIN_EYE_LED, LOW);
+          // os 4 trechos concluidos - encerra e aguarda novo disparo
+          ledReturnToIdlePulse();
           releaseServos();
           seqState = SEQ_IDLE;
           Serial.println("Sequencia concluida - aguardando novo disparo do sensor");
@@ -405,10 +500,9 @@ void setup() {
   pinMode(PIN_HCSR04_TRIG, OUTPUT);
   pinMode(PIN_HCSR04_ECHO, INPUT);
 
-  // --- LED do olho (so usa liga/desliga - digitalWrite direto, sem passar
-  //     pelo periferico LEDC, que os 3 servos tambem usam) ---
-  pinMode(PIN_EYE_LED, OUTPUT);
-  digitalWrite(PIN_EYE_LED, LOW);
+  // --- LED do olho (PWM via LEDC - canal proprio, independente dos 3 servos) ---
+  ledcAttach(PIN_EYE_LED, LED_PWM_FREQ_HZ, LED_PWM_RES_BITS);
+  updateEyeLed();   // ja aplica o primeiro valor da "respiracao" de repouso
 
   // --- servos: anexa e ja escreve a posicao central correta na mesma
   //     iteracao, servo por servo - sem gap entre attach() e o pulso certo
@@ -432,6 +526,8 @@ void setup() {
 // LOOP
 // ---------------------------------------------------------------------------
 void loop() {
+  updateEyeLed();   // roda sempre - respiracao em repouso ou rampa/brilho total em atividade
+
   if (seqState == SEQ_IDLE) {
     // So chama pulseIn() a cada SENSOR_CHECK_INTERVAL_MS.
     if (millis() - lastSensorCheckMs >= SENSOR_CHECK_INTERVAL_MS) {

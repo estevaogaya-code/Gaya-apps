@@ -21,6 +21,11 @@
       painel como "Novo sensor" assim que conecta, antes da 1a medicao.
     - 1a medicao apos ligar sai com PRIMEIRO_ENVIO_MS de maquina ligada
       (10 min), para conferir a instalacao; depois volta ao ciclo de 12 h.
+    - v2.1 - PICO: se o RMS de uma janela de 1 s passar de LIMIAR_PICO_MMS
+      (20 mm/s) em qualquer eixo, grava na hora um evento em v2_eventos,
+      fora do ciclo de 12 h (que segue normal). No maximo 1 evento a cada
+      PICO_INTERVALO_MIN_MS (30 min) por sensor, para nao inundar o banco
+      se a vibracao ficar alta por muito tempo.
 
   Processamento do sinal (filtros, integracao, RMS, criterio de maquina
   ligada, media entre envios) e IDENTICO ao firmware anterior.
@@ -53,7 +58,7 @@
   #include <U8g2lib.h>
 #endif
 
-const char* FW_VERSAO = "v2.0";
+const char* FW_VERSAO = "v2.1";
 
 // ---------- Firestore (REST) ----------
 // documents:commit permite carimbar o campo com a hora do servidor
@@ -64,6 +69,7 @@ const char* FIRESTORE_COMMIT_URL =
   "https://firestore.googleapis.com/v1/projects/analise-de-vibracao-fe8fc/databases/(default)/documents:commit";
 const char* COL_SENSORES = "v2_sensores";
 const char* COL_MEDICOES = "v2_medicoes";
+const char* COL_EVENTOS  = "v2_eventos";
 
 String macId     = ""; // 12 hex maiusculos, sem ":" - identificador unico do sensor
 String macSufixo = ""; // ultimos 4 - so para exibicao
@@ -143,6 +149,20 @@ bool   envioPendente = false;
 String pendenteDocId = "";
 float  pendenteH = 0, pendenteV = 0, pendenteA = 0;
 unsigned long pendenteJanelas = 0, pendenteLigadoMin = 0;
+
+// ---------- Evento de pico (fora do ciclo de 12 h) ----------
+const float LIMIAR_PICO_MMS = 20.0;                          // RMS de 1 s, qualquer eixo
+const unsigned long PICO_INTERVALO_MIN_MS = 30UL * 60UL * 1000UL; // no maximo 1 evento a cada 30 min
+
+// Mesmo esquema da medicao: valores e ID congelados ate o envio dar certo.
+// Enquanto pendente, se vier um pico maior, os valores sao atualizados
+// (o reenvio regrava o mesmo documento com o maior pico).
+bool   picoPendente = false;
+String picoDocId = "";
+float  picoH = 0, picoV = 0, picoA = 0;
+unsigned long picoProximaTentativaMs = 0;
+bool   algumPicoEnviado = false;
+unsigned long ultimoPicoEnviadoMs = 0;
 
 // ---------- Heartbeat / Wi-Fi ----------
 const unsigned long HEARTBEAT_INTERVAL_MS  = 60UL * 60UL * 1000UL; // 1 h
@@ -228,6 +248,32 @@ bool enviarMedicaoPendente() {
   int codigo = firestoreCommit("{\"writes\":[" + w + "," + writeStatusSensor() + "]}");
   Serial.printf("Medicao %s -> %d\n", pendenteDocId.c_str(), codigo);
   return codigo == 200;
+}
+
+// Grava o evento de pico em v2_eventos (H/V/A = RMS da janela de 1 s
+// em que o pico ocorreu) e atualiza o status do sensor na mesma transacao.
+bool enviarPicoPendente() {
+  if (WiFi.status() != WL_CONNECTED || !macValido()) return false;
+  String nome = String(FIRESTORE_DOC_PREFIX) + COL_EVENTOS + "/" + picoDocId;
+  String w = "{\"update\":{\"name\":\"" + nome + "\",\"fields\":{";
+  w += "\"mac\":{\"stringValue\":\"" + macId + "\"},";
+  w += "\"tipo\":{\"stringValue\":\"pico\"},";
+  w += "\"h\":{\"doubleValue\":" + String(picoH, 3) + "},";
+  w += "\"v\":{\"doubleValue\":" + String(picoV, 3) + "},";
+  w += "\"a\":{\"doubleValue\":" + String(picoA, 3) + "},";
+  w += "\"limiar\":{\"doubleValue\":" + String(LIMIAR_PICO_MMS, 1) + "},";
+  w += "\"fw\":{\"stringValue\":\"" + String(FW_VERSAO) + "\"}";
+  w += "}},\"updateTransforms\":[{\"fieldPath\":\"ts\",\"setToServerValue\":\"REQUEST_TIME\"}]}";
+
+  int codigo = firestoreCommit("{\"writes\":[" + w + "," + writeStatusSensor() + "]}");
+  Serial.printf("Pico %s -> %d\n", picoDocId.c_str(), codigo);
+  return codigo == 200;
+}
+
+String novoDocId() {
+  char sufixo[9];
+  snprintf(sufixo, sizeof(sufixo), "%08lX", (unsigned long)random(0x7FFFFFFF)); // random() usa o RNG de hardware no ESP32
+  return macId + "_" + String(sufixo);
 }
 
 // ---------- Display ----------
@@ -411,9 +457,7 @@ void loop() {
       pendenteA = somaA / contagemAmostras;
       pendenteJanelas = contagemAmostras;
       pendenteLigadoMin = acumuladorLigadoMs / 60000UL;
-      char sufixo[9];
-      snprintf(sufixo, sizeof(sufixo), "%08lX", (unsigned long)random(0x7FFFFFFF)); // random() usa o RNG de hardware no ESP32
-      pendenteDocId = macId + "_" + String(sufixo);
+      pendenteDocId = novoDocId();
       envioPendente = true;
       proximaTentativaMs = 0;
     }
@@ -431,6 +475,30 @@ void loop() {
       ultimoHeartbeat = agoraMs; // a medicao ja atualizou "visto"
     } else {
       proximaTentativaMs = agoraMs + RETRY_INTERVAL_MS;
+    }
+  }
+
+  // ---- Pico: dispara envio imediato, sem esperar o ciclo de 12 h ----
+  float maxJanela = max(rmsH, max(rmsV, rmsA));
+  if (maxJanela >= LIMIAR_PICO_MMS) {
+    if (picoPendente) {
+      if (maxJanela > max(picoH, max(picoV, picoA))) { picoH = rmsH; picoV = rmsV; picoA = rmsA; }
+    } else if (!algumPicoEnviado || agoraMs - ultimoPicoEnviadoMs >= PICO_INTERVALO_MIN_MS) {
+      picoH = rmsH; picoV = rmsV; picoA = rmsA;
+      picoDocId = novoDocId();
+      picoPendente = true;
+      picoProximaTentativaMs = 0;
+      Serial.printf("PICO detectado: %.2f mm/s\n", maxJanela);
+    }
+  }
+  if (picoPendente && (picoProximaTentativaMs == 0 || (long)(agoraMs - picoProximaTentativaMs) >= 0)) {
+    if (enviarPicoPendente()) {
+      picoPendente = false;
+      algumPicoEnviado = true;
+      ultimoPicoEnviadoMs = agoraMs;
+      ultimoHeartbeat = agoraMs; // o evento ja atualizou "visto"
+    } else {
+      picoProximaTentativaMs = agoraMs + RETRY_INTERVAL_MS;
     }
   }
 

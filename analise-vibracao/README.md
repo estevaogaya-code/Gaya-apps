@@ -23,6 +23,7 @@ legado/            arquivos da v1, só para consulta (NÃO publicados)
 | `v2_sensores/<MAC>` | firmware (ao ligar, a cada 1 h e a cada medição) | `mac`, `fw`, `ip`, `rssi`, `visto` (hora do servidor) |
 | `v2_sensores/<MAC>` | painel | `moinho`, `ponto`, `oculto`, `nomeadoEm` |
 | `v2_medicoes/<MAC>_<id>` | firmware (a cada 12 h de máquina ligada) | `mac`, `ts` (hora do servidor), `h`, `v`, `a` (mm/s RMS, média do ciclo), `janelas`, `ligadoMin`, `fw` |
+| `v2_eventos/<MAC>_<id>` | firmware (pico, fora do ciclo — fw v2.1+) | `mac`, `tipo`=`pico`, `ts` (hora do servidor), `h`, `v`, `a` (RMS da janela de 1 s), `limiar`, `fw` |
 
 - O nome do ponto existe **só** em `v2_sensores`. Renomear vale na hora, inclusive para o histórico.
 - `ts` é carimbado pelo servidor (`REQUEST_TIME`) — o relógio do ESP32 não é usado.
@@ -34,6 +35,9 @@ legado/            arquivos da v1, só para consulta (NÃO publicados)
 - **Online/offline**: sinal (`visto`) há menos/mais de 3 h (heartbeat a cada 1 h).
 - **Ocultar**: para sensor retirado/substituído; some do painel e dos relatórios, o histórico fica.
 - Não é permitido dois sensores ativos com o mesmo moinho + ponto.
+- **Pico**: RMS de 1 s ≥ 20 mm/s em qualquer eixo → o sensor grava um evento na hora (máx. 1 a cada 30 min).
+  Aparece no card por 30 h, como ✕ no gráfico do histórico e na coluna "Picos > 20" do relatório.
+- Regravar o firmware **não** exige renomear: o nome fica em `v2_sensores/<MAC>` e o MAC é do chip.
 
 ## Comissionamento de cada sensor
 

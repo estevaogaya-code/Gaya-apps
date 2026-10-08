@@ -46,6 +46,7 @@
   .card .rodape{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--dim);gap:6px;}
   .card .conexao{font-size:10.5px;margin-top:6px;}
   .card .conexao.on{color:var(--ok);} .card .conexao.off{color:var(--alarme);}
+  .card .pico{font-size:11px;font-weight:700;color:var(--alarme);margin-top:6px;}
   .acoes{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);display:flex;gap:6px;}
   .acoes button{flex:1;border:none;border-radius:6px;padding:7px 10px;font-size:11.5px;font-weight:600;cursor:pointer;}
   .btn-nomear{background:var(--accent);color:#fff;}
@@ -137,6 +138,12 @@ try{
 // v2_medicoes/<id>: gravado pelo firmware { mac, ts (hora do servidor), h, v, a, janelas, ligadoMin, fw }.
 const COL_SENSORES = 'v2_sensores';
 const COL_MEDICOES = 'v2_medicoes';
+// v2_eventos/<id>: picos enviados pelo firmware fora do ciclo de 12 h
+// { mac, tipo:'pico', ts, h, v, a (RMS da janela de 1 s), limiar }.
+const COL_EVENTOS = 'v2_eventos';
+const LIMIAR_PICO = 20; // mesmo valor do firmware (LIMIAR_PICO_MMS)
+// Pico continua destacado no card por este tempo.
+const PICO_DESTAQUE_MS = 30 * 60 * 60 * 1000;
 const ALERTA = 4.5, ALARME = 7.1;
 const MOINHOS_SUGERIDOS = ['501BM140','502BM140'];
 
@@ -197,6 +204,25 @@ async function carregarUltimasMedicoes(){
   return mapa;
 }
 
+async function carregarUltimosPicos(){
+  const mapa = {};
+  const snap = await db.collection(COL_EVENTOS).orderBy('ts','desc').limit(100).get();
+  snap.forEach(doc=>{
+    const d = doc.data();
+    const ts = tsMillis(d.ts);
+    if(!d.mac || !ts || mapa[d.mac]) return;
+    mapa[d.mac] = { ts, h: d.h, v: d.v, a: d.a };
+  });
+  return mapa;
+}
+
+// Maior eixo do pico: { valor, eixo }
+function maiorEixo(ev){
+  return [['H', ev.h], ['V', ev.v], ['A', ev.a]]
+    .filter(([, v]) => typeof v === 'number')
+    .reduce((m, [eixo, valor]) => (!m || valor > m.valor) ? { eixo, valor } : m, null);
+}
+
 // Estado do card: ISO (ok/alerta/alarme) ou "stale" quando não há medição recente.
 function avaliar(med){
   if(!med) return { status:'stale', label:'Aguardando 1ª medição' };
@@ -205,13 +231,17 @@ function avaliar(med){
   return { status: st, label: {ok:'OK', alerta:'Alerta', alarme:'Alarme'}[st] };
 }
 
-function renderCard(mac, sensor, med){
+function renderCard(mac, sensor, med, pico){
   const { status, label } = avaliar(med);
   const fmtV = (v)=> (typeof v === 'number') ? v.toFixed(2) : '—';
   const visto = tsMillis(sensor.visto);
   const online = visto && (Date.now() - visto < OFFLINE_MS);
   const conexao = visto
     ? `<div class="conexao ${online?'on':'off'}">${online?'● online':'○ offline'} · sinal ${formatarRelativo(visto)}</div>`
+    : '';
+  const picoMax = (pico && Date.now() - pico.ts < PICO_DESTAQUE_MS) ? maiorEixo(pico) : null;
+  const picoHtml = picoMax
+    ? `<div class="pico">⚡ Pico ${picoMax.valor.toFixed(1)} mm/s (${picoMax.eixo}) ${formatarRelativo(pico.ts)}</div>`
     : '';
   const ehNovo = !nomeado(sensor);
   const titulo = ehNovo ? `Novo sensor ${esc(mac.slice(-4))}` : esc(sensor.ponto);
@@ -233,6 +263,7 @@ function renderCard(mac, sensor, med){
           <span>medição ${formatarRelativo(med?.ts)}</span>
           <span class="tag ${status}">${label}</span>
         </div>
+        ${picoHtml}
         ${conexao}
       </a>
       <div class="acoes">${botao}</div>
@@ -244,9 +275,9 @@ async function montarPainel(){
     document.getElementById('conteudo').innerHTML = '<div class="loading">Sem conexão com a nuvem.</div>';
     return;
   }
-  let sensores, medicoes;
+  let sensores, medicoes, picos;
   try{
-    [sensores, medicoes] = await Promise.all([carregarSensores(), carregarUltimasMedicoes()]);
+    [sensores, medicoes, picos] = await Promise.all([carregarSensores(), carregarUltimasMedicoes(), carregarUltimosPicos()]);
   }catch(e){
     console.error('Erro ao carregar dados:', e);
     document.getElementById('subtitulo').textContent = 'Erro ao carregar dados — veja o console.';
@@ -271,7 +302,7 @@ async function montarPainel(){
 
   if(novos.length){
     html += `<div class="grupo"><h2>🆕 Novos sensores — nomeie para começar</h2><div class="grid">`;
-    novos.forEach(mac=>{ html += renderCard(mac, sensores[mac], medicoes[mac]); });
+    novos.forEach(mac=>{ html += renderCard(mac, sensores[mac], medicoes[mac], picos[mac]); });
     html += `</div></div>`;
   }
 
@@ -280,7 +311,7 @@ async function montarPainel(){
     const macs = porMoinho[moinho].sort((a,b)=> sensores[a].ponto.localeCompare(sensores[b].ponto,'pt-BR'));
     html += `<div class="grupo"><h2>${esc(moinho)}</h2><div class="grid">`;
     macs.forEach(mac=>{
-      html += renderCard(mac, sensores[mac], medicoes[mac]);
+      html += renderCard(mac, sensores[mac], medicoes[mac], picos[mac]);
       counts[avaliar(medicoes[mac]).status]++;
     });
     html += `</div></div>`;
@@ -388,6 +419,17 @@ async function buscarMedicoesPeriodo(diasAtras){
   return lista;
 }
 
+async function buscarEventosPeriodo(diasAtras){
+  const cutoff = firebase.firestore.Timestamp.fromMillis(Date.now() - diasAtras * 24 * 60 * 60 * 1000);
+  const lista = [];
+  const snap = await db.collection(COL_EVENTOS).where('ts', '>=', cutoff).get();
+  snap.forEach(doc=>{
+    const d = doc.data();
+    if(d.mac) lista.push({ mac: d.mac, h: d.h, v: d.v, a: d.a });
+  });
+  return lista;
+}
+
 // Sensores que entram no relatório (não ocultos), ordenados por moinho/ponto.
 function sensoresDoRelatorio(sensores){
   return Object.keys(sensores)
@@ -397,9 +439,11 @@ function sensoresDoRelatorio(sensores){
 
 const EIXOS = [['Horizontal','h'], ['Vertical','v'], ['Axial','a']];
 
-function calcularEstatisticas(medicoes, sensores){
+function calcularEstatisticas(medicoes, sensores, eventos){
   const porMac = {};
   medicoes.forEach(m=>{ (porMac[m.mac] = porMac[m.mac] || []).push(m); });
+  const eventosPorMac = {};
+  eventos.forEach(e=>{ (eventosPorMac[e.mac] = eventosPorMac[e.mac] || []).push(e); });
   const linhas = [];
   sensoresDoRelatorio(sensores).forEach(mac=>{
     const s = sensores[mac];
@@ -407,8 +451,9 @@ function calcularEstatisticas(medicoes, sensores){
     const ponto = nomeado(s) ? s.ponto : `Sem nome (${mac})`;
     EIXOS.forEach(([eixo, campo])=>{
       const vs = (porMac[mac] || []).map(m=>m[campo]).filter(v=>typeof v === 'number');
+      const qtdPicos = (eventosPorMac[mac] || []).filter(e=>typeof e[campo] === 'number' && e[campo] >= LIMIAR_PICO).length;
       if(vs.length === 0){
-        linhas.push({ moinho, ponto, eixo, n:0, media:null, max:null, statusMax:'stale', qtdAlerta:0, qtdAlarme:0 });
+        linhas.push({ moinho, ponto, eixo, n:0, media:null, max:null, statusMax:'stale', qtdAlerta:0, qtdAlarme:0, qtdPicos });
         return;
       }
       const media = vs.reduce((a,b)=>a+b,0) / vs.length;
@@ -418,6 +463,7 @@ function calcularEstatisticas(medicoes, sensores){
         statusMax: tagStatus(max),
         qtdAlerta: vs.filter(v=>v>=ALERTA && v<ALARME).length,
         qtdAlarme: vs.filter(v=>v>=ALARME).length,
+        qtdPicos,
       });
     });
   });
@@ -516,7 +562,7 @@ function desenharGraficosNoPDF(doc, medicoes, sensores){
   }
 }
 
-function gerarPDF(linhas, tituloPeriodo, diasAtras, medicoes, sensores){
+function gerarPDF(linhas, tituloPeriodo, diasAtras, medicoes, sensores, eventos){
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const agora = new Date();
@@ -530,7 +576,7 @@ function gerarPDF(linhas, tituloPeriodo, diasAtras, medicoes, sensores){
   const corStatus = { alarme:[229,80,79], alerta:[232,168,63] };
   doc.autoTable({
     startY: 33,
-    head: [['Moinho', 'Ponto', 'Eixo', 'Medições', 'Média (mm/s)', 'Máximo (mm/s)', 'Status', 'Nº Alertas', 'Nº Alarmes']],
+    head: [['Moinho', 'Ponto', 'Eixo', 'Medições', 'Média (mm/s)', 'Máximo (mm/s)', 'Status', 'Nº Alertas', 'Nº Alarmes', 'Picos > 20']],
     body: linhas.map(l => [
       l.moinho, l.ponto, l.eixo,
       l.n > 0 ? l.n : '—',
@@ -539,6 +585,7 @@ function gerarPDF(linhas, tituloPeriodo, diasAtras, medicoes, sensores){
       l.n === 0 ? 'Sem dados' : ({alarme:'ALARME', alerta:'Alerta', ok:'OK'}[l.statusMax]),
       l.qtdAlerta || 0,
       l.qtdAlarme || 0,
+      l.qtdPicos || 0,
     ]),
     styles: { fontSize: 8 },
     headStyles: { fillColor: [40, 44, 52] },
@@ -554,9 +601,10 @@ function gerarPDF(linhas, tituloPeriodo, diasAtras, medicoes, sensores){
 
   const totalAlarmes = linhas.reduce((s,l)=>s+(l.qtdAlarme||0),0);
   const totalAlertas = linhas.reduce((s,l)=>s+(l.qtdAlerta||0),0);
+  const totalPicos = eventos.filter(e=>!(sensores[e.mac] && sensores[e.mac].oculto)).length;
   const semDados = linhas.filter(l=>l.n===0).length;
   doc.setFontSize(9); doc.setTextColor(0);
-  doc.text(`Resumo do período: ${totalAlarmes} medição(ões) em Alarme · ${totalAlertas} em Alerta · ${semDados} série(s) sem dados no período.`, 14, doc.lastAutoTable.finalY + 8);
+  doc.text(`Resumo do período: ${totalAlarmes} medição(ões) em Alarme · ${totalAlertas} em Alerta · ${totalPicos} evento(s) de pico > ${LIMIAR_PICO} mm/s · ${semDados} série(s) sem dados no período.`, 14, doc.lastAutoTable.finalY + 8);
 
   desenharGraficosNoPDF(doc, medicoes, sensores);
   doc.save(`relatorio_vibracao_${diasAtras}d_${agora.toISOString().slice(0,10)}.pdf`);
@@ -568,9 +616,9 @@ async function exportarRelatorio(diasAtras, tituloPeriodo, btnId){
   btn.disabled = true;
   statusEl.textContent = 'Gerando relatório, aguarde…';
   try{
-    const [sensores, medicoes] = await Promise.all([carregarSensores(), buscarMedicoesPeriodo(diasAtras)]);
-    const linhas = calcularEstatisticas(medicoes, sensores);
-    gerarPDF(linhas, tituloPeriodo, diasAtras, medicoes, sensores);
+    const [sensores, medicoes, eventos] = await Promise.all([carregarSensores(), buscarMedicoesPeriodo(diasAtras), buscarEventosPeriodo(diasAtras)]);
+    const linhas = calcularEstatisticas(medicoes, sensores, eventos);
+    gerarPDF(linhas, tituloPeriodo, diasAtras, medicoes, sensores, eventos);
     statusEl.textContent = `Relatório gerado com ${medicoes.length} medição(ões) no período.`;
   }catch(e){
     console.error('Erro ao gerar relatório:', e);

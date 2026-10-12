@@ -199,7 +199,7 @@ async function carregarUltimasMedicoes(){
     const d = doc.data();
     const ts = tsMillis(d.ts);
     if(!d.mac || !ts || mapa[d.mac]) return;
-    mapa[d.mac] = { ts, h: d.h, v: d.v, a: d.a };
+    mapa[d.mac] = { ts, h: d.h, v: d.v, a: d.a, temp: d.temp }; // temp só existe no firmware com NTC
   });
   return mapa;
 }
@@ -258,6 +258,7 @@ function renderCard(mac, sensor, med, pico){
           <div class="eixo"><div class="v">${fmtV(med?.h)}</div><div class="k">H</div></div>
           <div class="eixo"><div class="v">${fmtV(med?.v)}</div><div class="k">V</div></div>
           <div class="eixo"><div class="v">${fmtV(med?.a)}</div><div class="k">A</div></div>
+          ${typeof med?.temp === 'number' ? `<div class="eixo"><div class="v">${med.temp.toFixed(1)}</div><div class="k">°C</div></div>` : ''}
         </div>
         <div class="rodape">
           <span>medição ${formatarRelativo(med?.ts)}</span>

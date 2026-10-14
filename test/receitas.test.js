@@ -7,7 +7,7 @@ const os      = require('os');
 const path    = require('path');
 const express = require('express');
 const criarReceitas = require('../receitas');
-const { validarPct, ipConfiavel, pinConfere, validarUmidade, normalizarNome } = criarReceitas;
+const { validarPct, ipConfiavel, pinConfere, validarUmidade, normalizarNome, validarPeso } = criarReceitas;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const PIN = '4321';
@@ -52,9 +52,19 @@ class FakePLC {
     this.ativas++; this.maxAtivas = Math.max(this.maxAtivas, this.ativas);
     try {
       if (this.atrasoLeitura) await sleep(this.atrasoLeitura);
+      const mb = /^(.*)\.(\d+)$/.exec(t.name); // bit de INT, ex.: VD_MR_RECEITAS_501[0].15
+      if (mb && (mb[1] in this.mem)) { t.value = ((this.mem[mb[1]] >> Number(mb[2])) & 1) === 1; return; }
       if (!(t.name in this.mem)) throw new Error('tag inexistente ' + t.name);
       t.value = this.mem[t.name]; t.controller_value = t.value;
     } finally { this.ativas--; }
+  }
+  // Escrita de bit (Read-Modify-Write): só o bit muda
+  async writeTag(t) {
+    this.bits = this.bits || [];
+    this.bits.push([t.name, t.value]);
+    if (this.falharBit && this.falharBit(t)) throw new Error('falha simulada no bit');
+    const [, w, b] = /^(.*)\.(\d+)$/.exec(t.name);
+    this.mem[w] = t.value ? (this.mem[w] | (1 << Number(b))) : (this.mem[w] & ~(1 << Number(b)));
   }
   async writeTagGroup(g) {
     this.escritas.push(g.tags.map(t => [t.name, t.value]));
@@ -78,7 +88,7 @@ async function montar(o = {}) {
     Tag: FakeTag, TagGroup: FakeGroup, dir, env,
     getNomes: () => cache.nomes,
     onNomes: (L, nomes) => { cache.nomes = { ...cache.nomes, [L]: nomes }; },
-    timeoutMs: 400, pausaReleituraMs: 5, leituraMs: 1000, esperaLockMs: 100, bloqueioMs: 300,
+    timeoutMs: 400, pausaReleituraMs: 5, pulsoMs: 20, leituraMs: 1000, esperaLockMs: 100, bloqueioMs: 300,
     ...o.opts,
   });
   const app = express();
@@ -656,5 +666,123 @@ test('nomes: conflito real (cache e CLP diferentes da tela) traz o detalhe', asy
     const r = await t.req('POST', '/api/receitas/501/nomes', corpoN(['BRASKEM', 'X', '', '', '', '', '', '', '']));
     assert.equal(r.status, 409);
     assert.deepEqual(r.corpo.detalhes, [{ componente: 2, tela: 'PAMPA', clp: 'AMBAR', len: 5, cache: 'AMBAR' }]);
+  } finally { await t.fechar(); }
+});
+
+// ─── Peso desejado na moega (PERCENTUAL_RECEITA_L[10]) ───────────────────────
+test('validarPeso — matriz', () => {
+  assert.equal(validarPeso(12000).ok, true);
+  assert.equal(validarPeso(5000).ok, true);
+  assert.equal(validarPeso(15000).ok, true);
+  assert.equal(validarPeso(4999).erro, 'peso_fora_da_faixa');
+  assert.equal(validarPeso(15001).erro, 'peso_fora_da_faixa');
+  assert.equal(validarPeso(12000.5).erro, 'peso_invalido');
+  assert.equal(validarPeso('12000').erro, 'peso_invalido');
+});
+
+const ANT_P = { ...ANT, umidade: UM, peso: 12000 };
+const corpoP = (peso, extra = {}) => ({ usuario: 'Teste', pct: [75, 25, 0, 0, 0, 0, 0, 0, 0], umidade: UM, peso, anterior: ANT_P, ...extra });
+
+test('peso: grava [10] no mesmo writeTagGroup, confere e registra', async () => {
+  const t = await montar();
+  try {
+    await sleep(30);
+    const r = await t.req('POST', '/api/receitas/501', corpoP(13000));
+    assert.equal(r.status, 200, JSON.stringify(r.corpo));
+    assert.equal(r.corpo.lido.base, 13000);
+    assert.equal(t.plc.mem['PERCENTUAL_RECEITA_501[10]'], 13000);
+    assert.equal(t.plc.mem['PERCENTUAL_RECEITA_502[10]'], 12000, '502 intocada');
+    assert.equal(t.plc.escritas.length, 1);
+    assert.ok(t.plc.escritas[0].some(e => e[0] === 'PERCENTUAL_RECEITA_501[10]'));
+    assert.ok(!t.plc.escritas[0].some(e => e[0] === 'PERCENTUAL_RECEITA_501[0]'), 'soma do CLP nunca é escrita');
+    await t.r._aguardarArquivos();
+    const ult = t.log().pop();
+    assert.equal(ult.antes.peso, 12000); assert.equal(ult.depois.peso, 13000); assert.equal(ult.leitura.peso, 13000);
+  } finally { await t.fechar(); }
+});
+
+test('peso: 400 (faixa, inteiro, sem anterior, sem alteração), 409 (mudou, pesagem), 502 (não aceito)', async () => {
+  const t = await montar();
+  try {
+    await sleep(30);
+    let r = await t.req('POST', '/api/receitas/501', corpoP(20000));
+    assert.equal(r.status, 400); assert.equal(r.corpo.erro, 'peso_fora_da_faixa');
+    r = await t.req('POST', '/api/receitas/501', corpoP(12000.5));
+    assert.equal(r.status, 400); assert.equal(r.corpo.erro, 'peso_invalido');
+    r = await t.req('POST', '/api/receitas/501', { ...corpoP(13000), anterior: { ...ANT, umidade: UM } });
+    assert.equal(r.status, 400); assert.equal(r.corpo.erro, 'anterior_obrigatorio');
+    r = await t.req('POST', '/api/receitas/501', corpoP(12000));
+    assert.equal(r.status, 400); assert.equal(r.corpo.erro, 'sem_alteracao');
+    t.plc.mem['PERCENTUAL_RECEITA_501[10]'] = 12500;
+    r = await t.req('POST', '/api/receitas/501', corpoP(13000));
+    assert.equal(r.status, 409); assert.equal(r.corpo.erro, 'conflito'); assert.equal(r.corpo.atual.base, 12500);
+    t.plc.mem['PERCENTUAL_RECEITA_501[10]'] = 12000;
+    t.plc.mem['VD_MR_RECEITAS_501[0]'] = 0x20;
+    r = await t.req('POST', '/api/receitas/501', corpoP(13000));
+    assert.equal(r.status, 409); assert.equal(r.corpo.erro, 'pesagem_em_andamento');
+    assert.equal(t.plc.escritas.length, 0);
+    t.plc.mem['VD_MR_RECEITAS_501[0]'] = 0;
+    t.plc.ignorar.add('PERCENTUAL_RECEITA_501[10]');
+    r = await t.req('POST', '/api/receitas/501', corpoP(13000));
+    assert.equal(r.status, 502); assert.ok(r.corpo.divergencias.some(d => d.campo === 'peso'));
+  } finally { await t.fechar(); }
+});
+
+// ─── Resets (pulso em VD_MR_RECEITAS_L[0].15 / .12) ──────────────────────────
+test('reset sistema: pulso liga→desliga só no bit .15, sem mexer nos outros bits', async () => {
+  const t = await montar();
+  try {
+    await sleep(30);
+    t.plc.mem['VD_MR_RECEITAS_501[0]'] = 0x04; // pesando: o reset existe justamente pra abortar o lote
+    const r = await t.req('POST', '/api/receitas/501/reset', { usuario: 'Teste', tipo: 'sistema' });
+    assert.equal(r.status, 200, JSON.stringify(r.corpo));
+    assert.deepEqual(t.plc.bits, [['VD_MR_RECEITAS_501[0].15', true], ['VD_MR_RECEITAS_501[0].15', false]]);
+    assert.equal(t.plc.mem['VD_MR_RECEITAS_501[0]'], 0x04, 'bit .2 preservado, .15 desligado');
+    assert.equal(t.plc.escritas.length, 0, 'nada da receita foi escrito');
+    await t.r._aguardarArquivos();
+    const ult = t.log().pop();
+    assert.equal(ult.rota, 'reset'); assert.equal(ult.tipo, 'sistema'); assert.equal(ult.resultado, 'ok');
+  } finally { await t.fechar(); }
+});
+
+test('reset totalizador usa o bit .12 da linha certa', async () => {
+  const t = await montar();
+  try {
+    await sleep(30);
+    const r = await t.req('POST', '/api/receitas/502/reset', { usuario: 'Teste', tipo: 'totalizador' });
+    assert.equal(r.status, 200, JSON.stringify(r.corpo));
+    assert.deepEqual(t.plc.bits, [['VD_MR_RECEITAS_502[0].12', true], ['VD_MR_RECEITAS_502[0].12', false]]);
+    assert.equal(t.plc.mem['VD_MR_RECEITAS_502[0]'], 0);
+  } finally { await t.fechar(); }
+});
+
+test('reset: bit já ligado → 409 sem escrever; tipo inválido → 400; PIN obrigatório', async () => {
+  const t = await montar();
+  try {
+    await sleep(30);
+    t.plc.mem['VD_MR_RECEITAS_501[0]'] = 1 << 15;
+    let r = await t.req('POST', '/api/receitas/501/reset', { usuario: 'T', tipo: 'sistema' });
+    assert.equal(r.status, 409); assert.equal(r.corpo.erro, 'bit_ja_ligado');
+    assert.equal(t.plc.bits, undefined);
+    r = await t.req('POST', '/api/receitas/501/reset', { usuario: 'T', tipo: 'tudo' });
+    assert.equal(r.status, 400); assert.equal(r.corpo.erro, 'tipo_invalido');
+    r = await t.req('POST', '/api/receitas/501/reset', { usuario: 'T', tipo: 'totalizador' }, '0000');
+    assert.equal(r.status, 401);
+    r = await t.req('POST', '/api/receitas/501/reset', { tipo: 'totalizador' });
+    assert.equal(r.status, 400); assert.equal(r.corpo.erro, 'usuario_obrigatorio');
+  } finally { await t.fechar(); }
+});
+
+test('reset: se não conseguir desligar o bit, tenta 3 vezes e avisa bit_preso', async () => {
+  const t = await montar();
+  try {
+    await sleep(30);
+    t.plc.falharBit = tag => tag.value === false;
+    const r = await t.req('POST', '/api/receitas/501/reset', { usuario: 'T', tipo: 'sistema' });
+    assert.equal(r.status, 502); assert.equal(r.corpo.erro, 'bit_preso');
+    assert.match(r.corpo.mensagem, /supervisório/);
+    assert.equal(t.plc.bits.filter(b => b[1] === false).length, 3);
+    await t.r._aguardarArquivos();
+    assert.equal(t.log().pop().resultado, 'bit_preso');
   } finally { await t.fechar(); }
 });

@@ -11,8 +11,9 @@
   Escreve no CLP via server.js -> receitas.js:
     GET    /api/receitas                 leitura das duas linhas + presets
     POST   /api/receitas/auth            valida o PIN (cabeçalho x-receitas-pin)
-    POST   /api/receitas/:linha          grava pct[1..9] + nº de componentes + umidade[1..9]
+    POST   /api/receitas/:linha          grava pct[1..9] + nº de componentes + umidade[1..9] + peso desejado [10]
     POST   /api/receitas/:linha/nomes    grava os nomes dos componentes (separado da receita)
+    POST   /api/receitas/:linha/reset    pulso de reset sistema (.15) ou totalizador (.12)
     POST   /api/receitas/presets/:linha  salva preset   (PIN)
     DELETE /api/receitas/presets/:l/:n   exclui preset  (PIN)
     GET    /api/receitas/log             auditoria
@@ -102,6 +103,13 @@
   .comp .inp.mudou{border-color:var(--warn);}
   .comp .inp.erro{border-color:var(--bad);}
   .comp.inativo .nome{color:var(--txt-dim);}
+  .peso-row{display:grid; grid-template-columns:1fr 120px; gap:8px; align-items:center;}
+  .peso-row .lbl{font-size:13.5px; font-weight:600;}
+  .peso-row .lbl small{display:block; font-size:11px; color:var(--txt-dim); font-weight:400; margin-top:2px;}
+  .peso-row .inp{padding:9px 10px; text-align:right; font-weight:700;}
+  .peso-row .inp.mudou{border-color:var(--warn);}
+  .peso-row .inp.erro{border-color:var(--bad);}
+  .cmd-desc{font-size:11.5px; color:var(--txt-dim); margin-top:4px; line-height:1.35;}
   .nomes-grid{display:grid; grid-template-columns:28px 1fr; gap:8px 8px; align-items:center;}
   .nomes-grid .n{font-weight:700; color:var(--txt-dim); text-align:right;}
   .nomes-grid .inp{padding:9px 10px; text-transform:uppercase;}
@@ -173,6 +181,15 @@
 <main>
   <div class="card" id="estado-card"><div class="pills" id="pills"></div><div class="ts" id="ts-leitura"></div></div>
 
+  <div class="section-title">Moega</div>
+  <div class="card">
+    <div class="peso-row">
+      <div class="lbl">Peso desejado na moega (kg)<small id="peso-atual">—</small></div>
+      <input class="inp" type="text" inputmode="numeric" id="peso" placeholder="kg">
+    </div>
+    <div class="cmd-desc">Grava junto com a receita (botão "Revisar alteração…"). Multiplica o % de cada componente.</div>
+  </div>
+
   <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
     <span>Componentes</span><button class="hist-btn" id="btn-nomes">✏️ Editar nomes</button>
   </div>
@@ -188,6 +205,15 @@
       <button class="btn sec" id="btn-recarregar">Recarregar do CLP</button>
     </div>
     <div class="row"><button class="btn" id="btn-revisar" disabled>Revisar alteração…</button></div>
+  </div>
+
+  <div class="section-title">Comandos</div>
+  <div class="card">
+    <div class="row" style="margin-top:0">
+      <button class="btn danger" id="btn-reset-sistema">Reset sistema</button>
+      <button class="btn sec" id="btn-reset-totalizador">Reset totalizador</button>
+    </div>
+    <div class="cmd-desc"><b>Reset sistema</b>: aborta o lote em andamento (zera o componente em dosagem e os erros). <b>Reset totalizador</b>: zera os totais pesados por componente.</div>
   </div>
 
   <div class="section-title">Presets</div>
@@ -221,7 +247,7 @@
   var linhaAtiva = '501';
   var dados = null;                   // última resposta de GET /api/receitas
   var edicao = { '501': null, '502': null }; // { pct:[9], um:[9] } — texto dos campos por linha
-  var UMID_MAX = 30, NOME_MAX = 12;
+  var UMID_MAX = 30, NOME_MAX = 12, PESO_MIN = 5000, PESO_MAX = 15000;
 
   // ── utilidades ──────────────────────────────────────────────────────────
   function $(id){ return document.getElementById(id); }
@@ -247,8 +273,17 @@
   function umidDe(d){ return (d.umidade && d.umidade.length === 9) ? d.umidade : [0,0,0,0,0,0,0,0,0]; }
   function camposDe(d){
     return { pct: d.pct.map(function(v){ return v ? fmt(v) : ''; }),
-             um:  umidDe(d).map(function(v){ return v ? fmt(v) : ''; }) };
+             um:  umidDe(d).map(function(v){ return v ? fmt(v) : ''; }),
+             peso: String(Math.round(Number(d.base) || 0)) };
   }
+  // Peso desejado: inteiro em kg dentro da faixa; null se inválido
+  function pesoDe(txt){
+    var s = String(txt).trim().replace(/\./g, '');
+    if (!/^\d{1,6}$/.test(s)) return null;
+    var v = parseInt(s, 10);
+    return (v < PESO_MIN || v > PESO_MAX) ? null : v;
+  }
+  function kg(v){ return Math.round(Number(v) || 0).toLocaleString('pt-BR'); }
   function nomeComp(L, i){ var n = dados && dados.linhas[L].nomes[i]; return n ? n : ('Componente ' + (i + 1)); }
 
   // Espera no máximo 40 s (o servidor responde em até ~25 s); status 0 = sem resposta
@@ -320,6 +355,7 @@
     }
     setConn(true);
     dados = r.corpo;
+    if (dados.limites){ PESO_MIN = dados.limites.pesoMin; PESO_MAX = dados.limites.pesoMax; UMID_MAX = dados.limites.umidadeMax; }
     ['501','502'].forEach(function(L){
       if (!manterEdicao || !edicao[L]) edicao[L] = camposDe(dados.linhas[L]);
     });
@@ -342,6 +378,8 @@
     var r = { cs: cs, ucs: ucs, erro: '', n: 0, soma: 0, mudou: false, campoErro: -1, umErro: erroU };
     if (erroCampo >= 0){ r.erro = 'Componente ' + (erroCampo + 1) + ': use um número de 0 a 100 com até 2 casas.'; r.campoErro = erroCampo; return r; }
     if (erroU >= 0){ r.erro = 'Umidade do componente ' + (erroU + 1) + ': use um número de 0 a ' + UMID_MAX + ' com até 2 casas.'; return r; }
+    r.peso = pesoDe(campos.peso);
+    if (r.peso === null){ r.erro = 'Peso desejado: número inteiro de ' + kg(PESO_MIN) + ' a ' + kg(PESO_MAX) + ' kg.'; r.pesoErro = true; return r; }
     r.soma = cs.reduce(function(a, b){ return a + b; }, 0);
     for (i = 0; i < 9; i++) if (cs[i] > 0) r.n = i + 1;
     for (i = 0; i < r.n; i++) if (cs[i] === 0){ r.erro = 'Componente ' + (i + 1) + ' está zerado antes do componente ' + r.n + ' — use os componentes em sequência a partir do 1.'; r.campoErro = i; break; }
@@ -349,7 +387,8 @@
     var atual = dados.linhas[L];
     var umAtual = umidDe(atual);
     r.umMudou = ucs.some(function(u, k){ return u !== centDe(umAtual[k]); });
-    r.mudou = cs.some(function(c, k){ return c !== centDe(atual.pct[k]); }) || r.n !== Math.round(atual.n) || r.umMudou;
+    r.pesoMudou = r.peso !== Math.round(Number(atual.base));
+    r.mudou = cs.some(function(c, k){ return c !== centDe(atual.pct[k]); }) || r.n !== Math.round(atual.n) || r.umMudou || r.pesoMudou;
     return r;
   }
 
@@ -362,7 +401,7 @@
     var somaOk = Math.abs(d.soma - 1) <= 1e-4;
     p.push('<span class="pill ' + (somaOk ? 'pill-on' : 'pill-bad') + '">Soma no CLP ' + fmt(d.somaPct) + '%</span>');
     p.push('<span class="pill pill-off">Nº comp. CLP: ' + esc(d.n) + '</span>');
-    p.push('<span class="pill pill-off">Base do lote: ' + esc(d.base) + '</span>');
+    p.push('<span class="pill pill-off">Peso desejado: ' + kg(d.base) + ' kg</span>');
     $('pills').innerHTML = p.join('');
     $('ts-leitura').textContent = 'Lido do CLP às ' + new Date(dados.ts).toLocaleTimeString('pt-BR');
 
@@ -374,6 +413,8 @@
               '<input class="inp" type="text" inputmode="decimal" data-i="' + i + '" data-campo="um" value="' + esc(edicao[L].um[i]) + '" placeholder="0"></div>';
     }
     $('comps').innerHTML = html;
+    $('peso').value = edicao[L].peso;
+    $('peso-atual').textContent = 'CLP: ' + kg(d.base) + ' kg · faixa ' + kg(PESO_MIN) + ' a ' + kg(PESO_MAX);
     atualizarResumo();
   }
 
@@ -389,6 +430,9 @@
     else if (!a.mudou){ m.className = 'msg'; m.textContent = 'Igual à receita atual do CLP.'; }
     else { m.className = 'msg warn'; m.textContent = 'Alterado — revise antes de gravar.'; }
     $('btn-revisar').disabled = !!a.erro || !a.mudou;
+    var pv = pesoDe(edicao[L].peso);
+    $('peso').classList.toggle('mudou', pv !== null && pv !== Math.round(Number(d.base)));
+    $('peso').classList.toggle('erro', pv === null);
     var um = umidDe(d);
     document.querySelectorAll('#comps .comp:not(.cab)').forEach(function(el, i){
       var ip = el.querySelector('[data-campo="pct"]'), iu = el.querySelector('[data-campo="um"]');
@@ -413,6 +457,7 @@
       render(); renderPresets(); carregarLog();
     });
   });
+  $('peso').addEventListener('input', function(){ edicao[linhaAtiva].peso = $('peso').value; atualizarResumo(); });
   $('btn-desfazer').addEventListener('click', function(){
     edicao[linhaAtiva] = camposDe(dados.linhas[linhaAtiva]); render();
   });
@@ -438,15 +483,15 @@
   function tabelaUmid(L, antesUm, depoisUcs, rotuloDepois){ return tabela(L, 'Umidade', antesUm.map(centDe), depoisUcs, rotuloDepois); }
   // Setpoint calculado pelo CLP: pct × base × (1 + umidade/100), na unidade da balança
   function tabelaSetpoint(L, d, a){
-    var base = Number(d.base) || 0, um = umidDe(d), h = '', linhas = 0;
+    var base = Number(d.base) || 0, baseNova = a.peso != null ? a.peso : base, um = umidDe(d), h = '', linhas = 0;
     h += '<table class="tbl" style="margin-top:6px"><thead><tr><th>Setpoint</th><th>Antes</th><th>Depois</th></tr></thead><tbody>';
     for (var i = 0; i < 9; i++){
-      var sa = d.pct[i] / 100 * base * (1 + um[i] / 100), sd = a.cs[i] / 10000 * base * (1 + a.ucs[i] / 10000);
+      var sa = d.pct[i] / 100 * base * (1 + um[i] / 100), sd = a.cs[i] / 10000 * baseNova * (1 + a.ucs[i] / 10000);
       if (!sa && !sd) continue;
       linhas++;
       h += '<tr class="' + (Math.round(sa) !== Math.round(sd) ? 'mudou' : '') + '"><td>' + (i + 1) + ' · ' + esc(nomeComp(L, i)) + '</td><td>' + Math.round(sa).toLocaleString('pt-BR') + '</td><td>' + Math.round(sd).toLocaleString('pt-BR') + '</td></tr>';
     }
-    return linhas ? h + '</tbody></table><div style="font-size:11px;color:var(--txt-dim);margin-top:4px">Setpoint = % × base (' + esc(base) + ') × (1 + umidade/100), na unidade da balança.</div>' : '';
+    return linhas ? h + '</tbody></table><div style="font-size:11px;color:var(--txt-dim);margin-top:4px">Setpoint = % × peso desejado (' + kg(baseNova) + ' kg) × (1 + umidade/100).</div>' : '';
   }
 
   $('btn-revisar').addEventListener('click', function(){ passo1(false); });
@@ -456,6 +501,7 @@
     if (a.erro || !a.mudou) return;
     var nAnt = Math.round(d.n), h = tabelaDiff(L, d.pct, a.cs);
     if (a.umMudou) h += tabelaUmid(L, umidDe(d), a.ucs);
+    if (a.pesoMudou) h += '<table class="tbl" style="margin-top:6px"><tbody><tr class="mudou"><td>Peso desejado na moega</td><td>' + kg(d.base) + ' kg</td><td>' + kg(a.peso) + ' kg</td></tr></tbody></table>';
     h += tabelaSetpoint(L, d, a);
     h += '<table class="tbl" style="margin-top:6px"><tbody><tr class="' + (a.n !== nAnt ? 'mudou' : '') + '"><td>Nº de componentes</td><td>' + nAnt + '</td><td>' + a.n + '</td></tr></tbody></table>';
     if (a.n !== nAnt) h += '<div class="aviso warn">⚠ O <b>nº de componentes muda de ' + nAnt + ' para ' + a.n + '</b> — o CLP passa a dosar ' + a.n + ' componente(s) por lote.</div>';
@@ -491,14 +537,15 @@
       usuario: operador(),
       pct: a.cs.map(function(c){ return c / 100; }),
       umidade: a.ucs.map(function(c){ return c / 100; }),
-      anterior: { pct: d.pct, n: d.n, umidade: umidDe(d) },
+      peso: a.peso,
+      anterior: { pct: d.pct, n: d.n, umidade: umidDe(d), peso: d.base },
       forcar: forcar === true,
     });
     var c = r.corpo || {}, h = '';
     if (r.status === 200){
       h = '<div class="aviso ok">✔ ' + esc(c.mensagem || 'Gravado.') + '</div>' + tabelaDiff(L, d.pct, c.lido.pct.map(centDe), 'Relido no CLP') +
           (a.umMudou ? tabelaUmid(L, umidDe(d), umidDe(c.lido).map(centDe), 'Relido no CLP') : '') +
-          '<div class="aviso info">Nº de componentes no CLP: <b>' + esc(c.lido.n) + '</b> · Soma calculada pelo CLP: <b>' + fmt(c.lido.somaPct) + '%</b></div>';
+          '<div class="aviso info">Nº de componentes no CLP: <b>' + esc(c.lido.n) + '</b> · Soma calculada pelo CLP: <b>' + fmt(c.lido.somaPct) + '%</b> · Peso desejado: <b>' + kg(c.lido.base) + ' kg</b></div>';
       abrirModal('Receita gravada — Linha ' + L, h + '<div class="row"><button class="btn" id="res-ok">OK</button></div>');
       $('res-ok').onclick = fecharModal;
       edicao[L] = null; await carregar(true);
@@ -537,8 +584,9 @@
       var ok = await carregar(true), h2;
       if (ok){
         var agora = dados.linhas[L].pct.map(centDe), umAgora = umidDe(dados.linhas[L]).map(centDe), umAntes = umidDe(d).map(centDe);
-        var gravou = agora.every(function(v, k){ return v === a.cs[k]; }) && umAgora.every(function(v, k){ return v === a.ucs[k]; });
-        var igualAntes = agora.every(function(v, k){ return v === centDe(d.pct[k]); }) && umAgora.every(function(v, k){ return v === umAntes[k]; });
+        var pesoAgora = Math.round(Number(dados.linhas[L].base));
+        var gravou = agora.every(function(v, k){ return v === a.cs[k]; }) && umAgora.every(function(v, k){ return v === a.ucs[k]; }) && pesoAgora === a.peso;
+        var igualAntes = agora.every(function(v, k){ return v === centDe(d.pct[k]); }) && umAgora.every(function(v, k){ return v === umAntes[k]; }) && pesoAgora === Math.round(Number(d.base));
         h2 = '<div class="aviso ' + (gravou ? 'ok' : 'warn') + '">' + (gravou ? '✔ O CLP já está com a receita que você enviou.'
              : igualAntes ? 'O CLP continua com a receita anterior — nada foi gravado. Pode tentar de novo.'
              : '⚠ O CLP está com uma receita diferente da anterior e da enviada — confira no supervisório.') + '</div>' +
@@ -626,6 +674,52 @@
   }
   $('btn-nomes').addEventListener('click', function(){ if (dados) abrirNomes(); });
 
+  // ── Comandos de reset (pulso no CLP) ────────────────────────────────────
+  var RESET_INFO = {
+    sistema: { titulo: 'Reset sistema', efeito: 'Aborta o lote em andamento: zera o componente em dosagem, desliga a pesagem (WF005/WF010) e zera os erros acumulados. O próximo lote recomeça do componente 1.' },
+    totalizador: { titulo: 'Reset totalizador', efeito: 'Zera os totais pesados por componente desta linha (os mesmos que o CLP zera sozinho às 06:59).' },
+  };
+  function confirmarReset(tipo){
+    var L = linhaAtiva, d = dados.linhas[L], info = RESET_INFO[tipo];
+    var h = '<div class="aviso warn">' + info.efeito + '</div>' +
+      (tipo === 'sistema' && d.pesando ? '<div class="aviso bad">⚖ <b>Há pesagem em andamento nesta linha</b> — ela será interrompida.</div>' : '') +
+      '<div class="aviso info">Linha <b>' + L + '</b> · Operador <b>' + esc(operador()) + '</b></div>' +
+      '<div class="row"><button class="btn sec" id="rs-cancelar">Cancelar</button><button class="btn" id="rs-continuar">Continuar</button></div>';
+    abrirModal(info.titulo + ' — Linha ' + L, h);
+    $('rs-cancelar').onclick = fecharModal;
+    $('rs-continuar').onclick = function(){
+      abrirModal('Confirmar ' + info.titulo.toLowerCase(), '<div class="aviso bad" style="font-size:14px">Enviar <b>' + info.titulo + '</b> para a <b>Linha ' + L + '</b>?<br>Não há desfazer.</div>' +
+        '<div class="row"><button class="btn sec" id="rs-voltar">Voltar</button><button class="btn danger" id="rs-enviar">Enviar ' + info.titulo + '</button></div>');
+      $('rs-voltar').onclick = function(){ confirmarReset(tipo); };
+      $('rs-enviar').onclick = function(){ enviarReset(L, tipo); };
+    };
+  }
+  async function enviarReset(L, tipo){
+    var info = RESET_INFO[tipo], ok = '<div class="row"><button class="btn" id="res-ok">OK</button></div>';
+    abrirModal('Enviando…', '<div class="aviso info">Enviando o pulso ao CLP e conferindo…</div>');
+    var r = await api('POST', '/api/receitas/' + L + '/reset', { usuario: operador(), tipo: tipo });
+    var c = r.corpo || {};
+    if (r.status === 200){
+      abrirModal(info.titulo + ' enviado — Linha ' + L, '<div class="aviso ok">✔ ' + esc(c.mensagem) + '</div>' + ok);
+      $('res-ok').onclick = function(){ fecharModal(); carregar(true); }; return;
+    }
+    if (r.status === 409 || r.status === 502){
+      abrirModal(r.status === 502 && c.erro === 'bit_preso' ? '⚠ Confira o supervisório' : info.titulo + ' não enviado',
+        '<div class="aviso ' + (c.erro === 'bit_preso' ? 'bad' : 'warn') + '">' + esc(c.mensagem) + '</div>' + ok);
+      $('res-ok').onclick = function(){ fecharModal(); carregar(true); }; return;
+    }
+    if ([400, 401, 403, 429, 503, 504].indexOf(r.status) < 0){
+      abrirModal('Resultado incerto', '<div class="aviso bad">Sem resposta válida do servidor (' + (r.status ? 'HTTP ' + r.status : 'sem conexão') + '). Não dá para saber se o ' + info.titulo.toLowerCase() + ' foi enviado — confira no supervisório.</div>' + ok);
+      $('res-ok').onclick = function(){ fecharModal(); carregar(true); }; return;
+    }
+    var t = textoErro(r);
+    if (r.status === 401 || r.status === 429) return;
+    abrirModal(info.titulo + ' não enviado', '<div class="aviso warn">' + esc(t) + '</div>' + ok);
+    $('res-ok').onclick = fecharModal;
+  }
+  $('btn-reset-sistema').addEventListener('click', function(){ if (dados) confirmarReset('sistema'); });
+  $('btn-reset-totalizador').addEventListener('click', function(){ if (dados) confirmarReset('totalizador'); });
+
   // ── Presets ─────────────────────────────────────────────────────────────
   function renderPresets(){
     var lista = (dados && dados.presets && dados.presets[linhaAtiva]) || [];
@@ -663,7 +757,8 @@
   // ── Log ─────────────────────────────────────────────────────────────────
   var ROTULO = { ok: '✔ gravado', conflito: 'conflito', pesagem_em_andamento: 'recusado (pesagem)', divergencia: '✖ divergência',
                  falha_escrita: '✖ falha de escrita', falha_releitura: '✖ sem releitura', falha_leitura: 'falha de leitura',
-                 timeout_nao_executado: 'timeout (não executado)', clp_offline: 'CLP offline', forcar_recusado_passo: 'recusado (passo)', pin_invalido: 'PIN inválido' };
+                 timeout_nao_executado: 'timeout (não executado)', clp_offline: 'CLP offline', forcar_recusado_passo: 'recusado (passo)', pin_invalido: 'PIN inválido',
+                 bit_ja_ligado: 'recusado (bit já ligado)', bit_preso: '✖ BIT FICOU LIGADO' };
   async function carregarLog(){
     var r = await api('GET', '/api/receitas/log?limit=60');
     if (r.status !== 200 || !Array.isArray(r.corpo)){ $('log-lista').innerHTML = '<div class="msg">Log indisponível.</div>'; return; }
@@ -671,7 +766,7 @@
     if (!itens.length){ $('log-lista').innerHTML = '<div class="msg">Nenhuma alteração registrada nesta linha.</div>'; return; }
     $('log-lista').innerHTML = itens.map(function(x){
       var o = x.rota === 'preset_salvar' ? 'preset salvo: ' + x.preset : x.rota === 'preset_excluir' ? 'preset excluído: ' + x.preset
-            : (x.rota === 'nomes' ? 'nomes: ' : '') + (ROTULO[x.resultado] || x.resultado);
+            : (x.rota === 'nomes' ? 'nomes: ' : x.rota === 'reset' ? (x.tipo === 'sistema' ? 'reset sistema: ' : 'reset totalizador: ') : '') + (x.rota === 'reset' && x.resultado === 'ok' ? '✔ enviado' : (ROTULO[x.resultado] || x.resultado));
       var det = '';
       if (x.rota === 'nomes' && x.antes && x.depois)
         det = Object.keys(x.depois).map(function(k){ return k + ': ' + (x.antes[k] || '—') + ' → ' + (x.depois[k] || '—'); }).join(', ');
@@ -680,6 +775,8 @@
         det = x.antes.pct.slice(0, nn).map(fmt).join('/') + ' → ' + x.depois.pct.slice(0, nn).map(fmt).join('/');
         if (x.antes.umidade && x.depois.umidade && x.antes.umidade.some(function(v, k){ return v !== x.depois.umidade[k]; }))
           det += ' · umid. ' + x.antes.umidade.slice(0, nn).map(fmt).join('/') + ' → ' + x.depois.umidade.slice(0, nn).map(fmt).join('/');
+        if (x.depois.peso != null && x.antes.peso != null && Math.round(x.antes.peso) !== x.depois.peso)
+          det += ' · peso ' + kg(x.antes.peso) + ' → ' + kg(x.depois.peso) + ' kg';
       }
       return '<div class="log-item"><div class="t">' + esc(new Date(x.ts).toLocaleString('pt-BR')) + ' · ' + esc(x.usuario || '—') + (x.forcar ? ' · forçado' : '') + '</div><div><b>' + esc(o) + '</b> ' + esc(det) + '</div></div>';
     }).join('');

@@ -4,7 +4,8 @@
  * Tags (escopo controlador, L = 501 | 502), conferidas no L5K MOAGEM_MNL62_14092026:
  *   PERCENTUAL_RECEITA_L[1..9]   REAL, fração 0–1 de cada componente (ESCRITA)
  *   PERCENTUAL_RECEITA_L[0]      REAL, soma calculada pelo CLP (CPT em GR4_RECEITA_L) — só leitura
- *   PERCENTUAL_RECEITA_L[10]     REAL, base de massa do lote (12000) — só leitura
+ *   PERCENTUAL_RECEITA_L[10]     REAL, peso desejado na moega / base do lote, kg (ESCRITA, junto
+ *                                com a receita; 5000–15000). Multiplica o % de cada componente.
  *   VA_RECEITAS_LWF005[2]        REAL, nº de componentes (PRE do contador = [2]+1) (ESCRITA)
  *                                Também lido em GR7_50xDG004_SILO_4: GEQ([2],4) de QUALQUER
  *                                linha participa do comando O501DG004V01C01 e O502DG004V01C01.
@@ -14,6 +15,10 @@
  *   VA_L_UMIDADE[1..9]           REAL, umidade em % do componente i (ESCRITA, junto com a receita).
  *                                Entra no setpoint: [i] * [10] * (1 + umidade/100), então mudar
  *                                no meio do lote tem o mesmo efeito de mudar o percentual.
+ *   VD_MR_RECEITAS_L[0].15       BOOL (bit de INT), "reset sistema": aborta o lote (OTU .2/.5,
+ *                                ACC = 0, zera erros). Só lido no ladder (ninguém desliga) → pulso.
+ *   VD_MR_RECEITAS_L[0].12       BOOL, "reset totalizador": zera VA_RECEITAS_LWF005[31..39]. Pulso.
+ *                                Bits gravados com Read-Modify-Write (só o bit muda na palavra).
  *   NOME_PRODUTO0i_L             STRING (LEN DINT + DATA SINT[82]). Não é usado em lógica do
  *                                ladder, só exibido. Gravado membro a membro (.DATA[k] SINT e
  *                                .LEN DINT), porque o st-ethernet-ip lê STRING como estrutura
@@ -36,6 +41,11 @@ const express = require('express');
 const LINHAS = ['501', '502'];
 const N_COMP = 9;
 const UMIDADE_MAX = 30;      // % — faixa aceita para a umidade de cada componente
+const PESO_MIN = 5000, PESO_MAX = 15000; // kg — peso desejado na moega (PERCENTUAL_RECEITA_L[10])
+const RESETS = {             // bit de VD_MR_RECEITAS_L[0] acionado por pulso
+  sistema:     { bit: 15, rotulo: 'Reset sistema' },
+  totalizador: { bit: 12, rotulo: 'Reset totalizador' },
+};
 const NOME_MAX = 12;         // caracteres — o que o supervisório exibe
 const STRING_DATA_MAX = 82;  // tamanho do DATA do STRING padrão Logix
 const SINT = 0xC2, DINT = 0xC4; // códigos CIP, para criar tags sem leitura prévia
@@ -96,6 +106,13 @@ function validarUmidade(u) {
     c.push(v);
   }
   return { ok: true, centesimos: c };
+}
+
+// Peso desejado na moega: inteiro em kg dentro da faixa
+function validarPeso(v) {
+  if (typeof v !== 'number' || !Number.isInteger(v)) return { erro: 'peso_invalido', detalhe: 'Peso desejado: número inteiro em kg' };
+  if (v < PESO_MIN || v > PESO_MAX) return { erro: 'peso_fora_da_faixa', detalhe: `Peso desejado: entre ${PESO_MIN} e ${PESO_MAX} kg` };
+  return { ok: true, peso: v };
 }
 
 // Nome de componente: ASCII imprimível, maiúsculas, até NOME_MAX (vazio permitido)
@@ -180,6 +197,7 @@ function criarReceitas(opts) {
     esperaLockMs  = 5000,    // drenagem desiste do ciclo se a leitura de nomes não liberar
     leituraMs     = 2000,    // timeout por leitura de tag
     pausaReleituraMs = 300,
+    pulsoMs       = 1000,    // duração do pulso dos botões de reset
     maxFalhasPin  = 5,
     bloqueioMs    = 10 * 60 * 1000,
   } = opts;
@@ -401,20 +419,22 @@ function criarReceitas(opts) {
   const validarLinha = L => LINHAS.includes(String(L));
 
   // ── Operação de gravação (roda dentro da fila) ─────────────────────────────
-  async function gravar(PLC, job, { L, alvo, umAlvo, anterior, forcar, usuario, ip }) {
+  async function gravar(PLC, job, { L, alvo, umAlvo, pesoAlvo, anterior, forcar, usuario, ip }) {
     const log = { ip, usuario, linha: L, depois: { pct: alvo.centesimos.map(c => c / 100), n: alvo.n }, forcar: !!forcar };
     if (umAlvo) log.depois.umidade = umAlvo.map(c => c / 100);
+    if (pesoAlvo != null) log.depois.peso = pesoAlvo;
     let antes;
     try { antes = await lerLinha(PLC, L); }
     catch (e) { registrarLog({ ...log, resultado: 'falha_leitura' }); throw e; }
     const va = antes.valores;
-    log.antes = { pct: va.centesimos.map(c => c / 100), n: va.n, umidade: va.umidadeC.map(c => c / 100), soma: va.soma, pesando: va.pesando };
+    log.antes = { pct: va.centesimos.map(c => c / 100), n: va.n, umidade: va.umidadeC.map(c => c / 100), peso: va.base, soma: va.soma, pesando: va.pesando };
     const atual = formatarLinha(L, va);
 
     // Controle otimista: o que a tela mostrava ainda é o que está no CLP?
     const antC = anterior.pct.map(paraCentesimos);
     const mudou = antC.some((c, i) => c !== va.centesimos[i]) || !(Math.abs(Number(anterior.n) - va.n) < 1e-3)
-      || (umAlvo && anterior.umidade.map(paraCentesimos).some((c, i) => c !== va.umidadeC[i]));
+      || (umAlvo && anterior.umidade.map(paraCentesimos).some((c, i) => c !== va.umidadeC[i]))
+      || (pesoAlvo != null && !(Math.abs(Number(anterior.peso) - va.base) < 0.5));
     if (mudou) {
       registrarLog({ ...log, resultado: 'conflito' });
       throw erroHttp(409, 'conflito', { atual, mensagem: 'A receita no CLP mudou desde que a tela foi carregada (alguém alterou). Recarregue e confira.' });
@@ -454,6 +474,10 @@ function criarReceitas(opts) {
     }
     antes.tags.n.value = alvo.n;
     grupo.add(antes.tags.n);
+    if (pesoAlvo != null) {
+      antes.tags.pct[10].value = pesoAlvo;
+      grupo.add(antes.tags.pct[10]);
+    }
     if (umAlvo) for (let i = 0; i < N_COMP; i++) {
       const t = antes.tags.umidade[i];
       t.value = Math.fround(umAlvo[i] / 100);
@@ -482,13 +506,14 @@ function criarReceitas(opts) {
       if (umAlvo) for (let i = 0; i < N_COMP; i++)
         if (Math.fround(depois.umidadeBruta[i]) !== Math.fround(umAlvo[i] / 100))
           divergencias.push({ campo: 'umidade', componente: i + 1, esperado: umAlvo[i] / 100, lido: Math.round(depois.umidadeBruta[i] * 1e4) / 1e4 });
+      if (pesoAlvo != null && Math.fround(depois.base) !== Math.fround(pesoAlvo)) divergencias.push({ campo: 'peso', esperado: pesoAlvo, lido: depois.base });
       if (!(Math.abs(depois.soma - 1) <= 1e-4)) divergencias.push({ campo: 'soma_clp', esperado: 1, lido: depois.soma });
     }
 
     const lido = depois ? formatarLinha(L, depois) : null;
     const resultado = erroEscrita ? 'falha_escrita' : !depois ? 'falha_releitura' : divergencias.length ? 'divergencia' : 'ok';
     registrarLog({ ...log, resultado, erroEscrita, erroReleitura, divergencias,
-      leitura: depois ? { pct: lido.pct, n: depois.n, umidade: lido.umidade, soma: depois.soma } : null });
+      leitura: depois ? { pct: lido.pct, n: depois.n, umidade: lido.umidade, peso: depois.base, soma: depois.soma } : null });
 
     if (resultado === 'ok') return { ok: true, linha: L, lido, mensagem: 'Receita gravada e conferida no CLP.' };
     throw erroHttp(502, resultado, {
@@ -579,6 +604,49 @@ function criarReceitas(opts) {
       mensagem: 'A gravação dos nomes NÃO foi confirmada. Confira no supervisório.' });
   }
 
+  // ── Resets (pulso em bit de VD_MR_RECEITAS_L[0], roda dentro da fila) ───────
+  // O ladder só lê esses bits; quem liga e desliga é a IHM. Aqui: confere que
+  // está desligado, liga, espera pulsoMs, desliga (com nova tentativa) e
+  // confere que desligou. Desligar é feito mesmo se o tempo da operação acabar.
+  async function executarReset(PLC, job, { L, tipo, usuario, ip }) {
+    const { bit, rotulo } = RESETS[tipo];
+    const nome = `VD_MR_RECEITAS_${L}[0].${bit}`;
+    const log = { ip, usuario, linha: L, rota: 'reset', tipo };
+    let tag, antes;
+    try { tag = await lerTag(PLC, nome); antes = (await lerLinha(PLC, L)).valores; }
+    catch (e) { registrarLog({ ...log, resultado: 'falha_leitura' }); throw e; }
+    log.antes = { pesando: antes.pesando };
+    if (tag.value) {
+      registrarLog({ ...log, resultado: 'bit_ja_ligado' });
+      throw erroHttp(409, 'bit_ja_ligado', { mensagem: `${rotulo}: o bit ${nome} já está ligado (alguém está acionando pelo supervisório, ou ficou preso). Confira no supervisório.` });
+    }
+    if (job.cancelado) {
+      registrarLog({ ...log, resultado: 'timeout_nao_executado' });
+      throw erroHttp(504, 'timeout', { executado: false, mensagem: 'Tempo esgotado — o reset não foi enviado.' });
+    }
+    const erroDe = e => (e && e.generalStatusCode != null) ? `CIP status ${e.generalStatusCode}` : ((e && e.message) || String(e));
+    let erroLigar = null, erroDesligar = null, desligado = false;
+    job.escritaEnviada = true;
+    try { tag.value = true; await PLC.writeTag(tag); } catch (e) { erroLigar = erroDe(e); }
+    await sleep(pulsoMs);
+    for (let tent = 0; tent < 3 && !desligado; tent++) {
+      try {
+        tag.value = false; await PLC.writeTag(tag);
+        await sleep(pausaReleituraMs);
+        desligado = !(await lerTag(PLC, nome)).value;
+        if (!desligado) erroDesligar = 'releitura mostra o bit ainda ligado';
+      } catch (e) { erroDesligar = erroDe(e); }
+    }
+    let depois = null;
+    try { depois = (await lerLinha(PLC, L)).valores; } catch (_) {}
+    const resultado = !desligado ? 'bit_preso' : erroLigar ? 'falha_escrita' : 'ok';
+    registrarLog({ ...log, resultado, erroLigar, erroDesligar: desligado ? null : erroDesligar, depois: depois ? { pesando: depois.pesando } : null });
+    if (resultado === 'ok') return { ok: true, linha: L, tipo, lido: depois ? formatarLinha(L, depois) : null, mensagem: `${rotulo} enviado à linha ${L}.` };
+    if (resultado === 'bit_preso') throw erroHttp(502, 'bit_preso', { erroDesligar,
+      mensagem: `ATENÇÃO: o bit ${nome} pode ter ficado LIGADO${tipo === 'sistema' ? ' — com ele ligado a dosagem fica parada' : ''}. Desligue pelo supervisório agora.` });
+    throw erroHttp(502, 'falha_escrita', { erroEscrita: erroLigar, mensagem: `${rotulo} não foi aceito pelo CLP (bit voltou a desligado).` });
+  }
+
   // ── Rotas ──────────────────────────────────────────────────────────────────
   const router = express.Router();
 
@@ -589,7 +657,7 @@ function criarReceitas(opts) {
         for (const L of LINHAS) out[L] = formatarLinha(L, (await lerLinha(PLC, L)).valores);
         return out;
       });
-      res.json({ ok: true, ts: agora(), linhas, presets, escritaHabilitada: !!pinEsperado() });
+      res.json({ ok: true, ts: agora(), linhas, presets, escritaHabilitada: !!pinEsperado(), limites: { pesoMin: PESO_MIN, pesoMax: PESO_MAX, umidadeMax: UMIDADE_MAX } });
     } catch (e) { responderErro(res, e); }
   });
 
@@ -672,6 +740,24 @@ function criarReceitas(opts) {
     }
   });
 
+  router.post('/api/receitas/:linha/reset', registrarChegada, ...protegido, async (req, res) => {
+    const L = req.params.linha;
+    if (!validarLinha(L)) return res.status(400).json({ ok: false, erro: 'linha_invalida', mensagem: 'Linha deve ser 501 ou 502.' });
+    const b = req.body || {};
+    const usuario = typeof b.usuario === 'string' ? b.usuario.trim() : '';
+    if (!usuario || usuario.length > 60) return res.status(400).json({ ok: false, erro: 'usuario_obrigatorio', mensagem: 'Informe o operador (até 60 caracteres).' });
+    if (!Object.prototype.hasOwnProperty.call(RESETS, b.tipo)) return res.status(400).json({ ok: false, erro: 'tipo_invalido', mensagem: 'tipo deve ser "sistema" ou "totalizador".' });
+    const ip = ipDe(req);
+    try {
+      res.json(await enfileirar(`reset ${b.tipo} ${L}`, (PLC, job) => executarReset(PLC, job, { L, tipo: b.tipo, usuario, ip })));
+    } catch (e) {
+      const c = e && e.corpo;
+      if (c && (c.erro === 'clp_offline' || (c.erro === 'timeout' && c.etapa === 'fila')))
+        registrarLog({ ip, usuario, linha: L, rota: 'reset', tipo: b.tipo, resultado: c.erro === 'clp_offline' ? 'clp_offline' : 'timeout_nao_executado' });
+      responderErro(res, e);
+    }
+  });
+
   router.post('/api/receitas/:linha', registrarChegada, ...protegido, async (req, res) => {
     const L = req.params.linha;
     if (!validarLinha(L)) return res.status(400).json({ ok: false, erro: 'linha_invalida', mensagem: 'Linha deve ser 501 ou 502.' });
@@ -692,14 +778,24 @@ function criarReceitas(opts) {
         return res.status(400).json({ ok: false, erro: 'anterior_obrigatorio', mensagem: 'Envie a umidade anterior que a tela mostrava.' });
       umAlvo = vu.centesimos;
     }
+    // Peso desejado na moega: também opcional
+    let pesoAlvo = null;
+    if (b.peso !== undefined) {
+      const vp = validarPeso(b.peso);
+      if (!vp.ok) return res.status(400).json({ ok: false, ...vp, mensagem: vp.detalhe });
+      if (!Number.isFinite(Number(ant.peso)))
+        return res.status(400).json({ ok: false, erro: 'anterior_obrigatorio', mensagem: 'Envie o peso desejado anterior que a tela mostrava.' });
+      pesoAlvo = vp.peso;
+    }
     const antC = ant.pct.map(paraCentesimos);
     const umIgual = !umAlvo || ant.umidade.map(paraCentesimos).every((c, i) => c === umAlvo[i]);
-    if (antC.every((c, i) => c === alvo.centesimos[i]) && Math.round(Number(ant.n)) === alvo.n && umIgual)
+    const pesoIgual = pesoAlvo == null || Math.round(Number(ant.peso)) === pesoAlvo;
+    if (antC.every((c, i) => c === alvo.centesimos[i]) && Math.round(Number(ant.n)) === alvo.n && umIgual && pesoIgual)
       return res.status(400).json({ ok: false, erro: 'sem_alteracao', mensagem: 'Nada mudou em relação à receita atual.' });
 
     const ip = ipDe(req);
     try {
-      const r = await enfileirar(`gravar ${L}`, (PLC, job) => gravar(PLC, job, { L, alvo, umAlvo, anterior: ant, forcar: b.forcar === true, usuario, ip }));
+      const r = await enfileirar(`gravar ${L}`, (PLC, job) => gravar(PLC, job, { L, alvo, umAlvo, pesoAlvo, anterior: ant, forcar: b.forcar === true, usuario, ip }));
       res.json(r);
     } catch (e) {
       // Os demais desfechos são registrados dentro de gravar(); aqui só o que não chegou a executar
@@ -726,3 +822,4 @@ module.exports.pinConfere = pinConfere;
 module.exports.tagsDaLinha = tagsDaLinha;
 module.exports.validarUmidade = validarUmidade;
 module.exports.normalizarNome = normalizarNome;
+module.exports.validarPeso = validarPeso;

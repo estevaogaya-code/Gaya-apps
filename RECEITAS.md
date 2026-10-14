@@ -43,6 +43,32 @@ node --test test/receitas.test.js
   Por isso o servidor recusa "forçar" quando `n` muda e `COUNTER_MR_RECEITAS_L[0].ACC > novo n`
   (ou quando não consegue ler o ACC).
 
+## Peso desejado e resets (14/10/2026)
+
+- **Peso desejado na moega** = `PERCENTUAL_RECEITA_L[10]` (base do lote, kg). Campo na tela,
+  gravado **junto com a receita** (mesmo `writeTagGroup`), inteiro de 5.000 a 15.000 kg, com as
+  mesmas regras: 409 se mudou no CLP, bloqueio durante a pesagem (com "forçar"), releitura.
+  A confirmação mostra o setpoint de cada componente com o peso novo.
+- **Reset sistema** = `VD_MR_RECEITAS_L[0].15` e **Reset totalizador** = `VD_MR_RECEITAS_L[0].12`
+  (`POST /api/receitas/:linha/reset`, `tipo` = `sistema` | `totalizador`, PIN + rede confiável).
+  - No ladder os dois bits só são lidos (XIC/XIO); quem liga e desliga é a IHM. Por isso o servidor
+    manda um **pulso**: confere que está desligado, liga, espera 1 s, desliga (até 3 tentativas)
+    e relê. Se o bit já estiver ligado, recusa (409). Se não conseguir desligar, avisa `bit_preso`:
+    com o .15 ligado a dosagem fica parada — desligar pelo supervisório.
+  - Escrita só do bit com o serviço Read-Modify-Write do CLP: os outros bits da palavra
+    (.2, .3, .5…, que o ladder escreve) não são tocados.
+  - Reset sistema (`.15`): `OTU .2/.5` (fim da pesagem), `.3`, `ACC = 0`, `OTU INICIO_PESAGEM`,
+    zera `VA_MR_RECEITAS_ERRO_L[]`. Reset totalizador (`.12`): zera `VA_RECEITAS_LWF005[31..39]`.
+  - Liberados durante a pesagem (o reset sistema existe justamente para abortar o lote).
+
+### Bancada — peso e resets (moinho parado)
+
+1. Peso: 12000 → 12001 → conferir `PERCENTUAL_RECEITA_501[10]` no RSLogix → voltar a 12000.
+2. Reset totalizador: anotar `VA_RECEITAS_501WF005[31..39]`, enviar, conferir zerados e
+   `VD_MR_RECEITAS_501[0].12` = 0.
+3. Reset sistema: sem lote em andamento, enviar e conferir `VD_MR_RECEITAS_501[0].15` = 0 e
+   `COUNTER_MR_RECEITAS_501[0].ACC` = 0. Se o supervisório tiver o mesmo botão, comparar o efeito.
+
 ## Umidade e nomes (02/10/2026)
 
 - **Umidade** `VA_L_UMIDADE[1..9]` (REAL, %): editada na mesma tela e gravada **junto com a

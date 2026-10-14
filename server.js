@@ -866,6 +866,73 @@ async function calcDispPerfMedia(linha, inicio, fim) {
   return { disponibilidade, performance };
 }
 
+// ─── Detalhe do boletim (receitas por turno + consumo de MP por data) ──────
+// Alimenta o PDF do mobile-status no MESMO formato do PDF do app Cimento
+// Gaúcho. Lê tudo da tabela do Firestore (payload.months[].m1/m2/cpiiz) e usa
+// a mesma regra do app: consumo = produção de cada turno × proporção da
+// receita (rec.mps[nome]; legado: campos fixos uy/ca/esc/ges/adi/cinza/ped).
+app.get('/api/boletim/detalhe', async (req, res) => {
+  const agora  = Date.now();
+  const inicio = parseInt(req.query.inicio) || agora - 86400000;
+  const fim    = parseInt(req.query.fim)    || agora;
+  const payload = await getPayloadFirestore();
+  if (!payload || !Array.isArray(payload.months)) return res.json({ dias: [], consumo: { mats: [], dias: [] }, ok: false });
+
+  const receitasApp = Array.isArray(payload.receitas) ? payload.receitas : [];
+  const K2MAT = { uy:'Clinquer Uruguay', ca:'Clinquer Caçapava', esc:'Escória', ges:'Gesso', adi:'Aditivo', cinza:'Cinza', ped:'Pedrisco' };
+  const N = v => parseFloat(v) || 0;
+  const achaRec = (nome, r, turno) => receitasApp.find(x => x.produto === nome)
+    || receitasApp.find(x => classRecQ(x.produto) === classRecQ(nome));
+  function calcMps(prod, rec) {
+    const out = {};
+    if (!rec || !(prod > 0)) return out;
+    const mps = rec.mps || {};
+    Object.keys(mps).forEach(n => { out[n] = (out[n] || 0) + prod * (mps[n] || 0); });
+    if (!Object.values(mps).some(v => v > 0)) {
+      Object.keys(K2MAT).forEach(k => { out[K2MAT[k]] = (out[K2MAT[k]] || 0) + prod * (rec[k] || 0); });
+    }
+    return out;
+  }
+  function consumoRow(r) {
+    const dProd = N(r.dProd), nProd = N(r.nProd);
+    if (!dProd && !nProd) return {};
+    const recD = achaRec(r.receitaD || r.receita);
+    const recN = achaRec(r.receitaN || r.receita) || recD;
+    const tot = calcMps(dProd, recD);
+    const n = calcMps(nProd, recN);
+    Object.keys(n).forEach(k => { tot[k] = (tot[k] || 0) + n[k]; });
+    return tot;
+  }
+  const slim = r => r ? {
+    receitaD: r.receitaD || r.receita || null, receitaN: r.receitaN || r.receita || null,
+    dProd: N(r.dProd), nProd: N(r.nProd), dTh: N(r.dTh), nTh: N(r.nTh),
+    dMalha: numOrNullQ(r.dMalha), nMalha: numOrNullQ(r.nMalha),
+    dBlaine: numOrNullQ(r.dBlaine != null ? r.dBlaine : r.blaine), nBlaine: numOrNullQ(r.nBlaine),
+  } : null;
+
+  const dias = [], consDias = [], usadas = new Set();
+  for (let t = inicio; t < fim; t += 86400000) {
+    const d = new Date(t);
+    const chaveMes = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const dataDia  = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
+    const mes = payload.months.find(m => m.key === chaveMes);
+    if (!mes) continue;
+    const pega = arr => Array.isArray(arr) ? arr.find(r => r.data === dataDia) : null;
+    const r1 = pega(mes.m1), r2 = pega(mes.m2), rc = pega(mes.cpiiz);
+    dias.push({ data: dataDia, 501: slim(r1), 502: slim(r2), cpiiz: slim(rc) });
+    const tot = {};
+    [r1, r2, rc].forEach(r => {
+      if (!r || (N(r.dProd) + N(r.nProd)) <= 0) return;
+      const c = consumoRow(r);
+      Object.keys(c).forEach(n => { if (c[n]) tot[n] = (tot[n] || 0) + c[n]; });
+    });
+    if (Object.keys(tot).length) { consDias.push({ data: dataDia, tot }); Object.keys(tot).forEach(n => usadas.add(n)); }
+  }
+  const ordem = Array.isArray(payload.materiais) ? payload.materiais : ['Clinquer Uruguay','Clinquer Caçapava','Escória','Gesso','Aditivo','Cinza'];
+  const mats = [...ordem.filter(n => usadas.has(n)), ...[...usadas].filter(n => !ordem.includes(n))];
+  res.json({ ok: true, dias, consumo: { mats, dias: consDias } });
+});
+
 // ─── API Boletim (Diário/Mensal) ───────────────────────────────────────────
 // Usa a MESMA fonte que a aba "Dados de Produção" (producao.turnos, permanente,
 // até 90 turnos ≈ 45 dias) — NÃO usa db.amostras (janela de só 7 dias, HISTORY_DAYS).
@@ -2211,12 +2278,12 @@ function calcAcum(acum, clpTon, clpTh, clpMin, ln='501', kwhClp=null) {
     ? parseFloat((potMediaTotal / thMedia).toFixed(2))
     : null;
 
-  // kW/t REAL do CLP (TOTALIZADOR[47]/[39]) — média das amostras do turno
-  // com moinho rodando. Preferido sobre o cálculo acima quando disponível.
-  const amostrasKwhtClpRodando = amostrasRodando.filter(a => a.kwhtClp != null);
+  // kW/t REAL do CLP (TOTALIZADOR[47]/[39]) — valor do PRÓPRIO CLP, sem recalcular.
+  // Usa a última amostra válida com o moinho rodando no turno (o CLP já integra
+  // o turno inteiro: AJUSTE[9]+130 / t/h média acumulada), igual para 501 e 502.
+  const amostrasKwhtClpRodando = amostrasRodando.filter(a => a.kwhtClp != null && a.kwhtClp > 0);
   const kwhtClpReal = amostrasKwhtClpRodando.length > 0
-    ? parseFloat((amostrasKwhtClpRodando.reduce((s, a) => s + a.kwhtClp, 0)
-        / amostrasKwhtClpRodando.length).toFixed(2))
+    ? parseFloat(amostrasKwhtClpRodando[amostrasKwhtClpRodando.length - 1].kwhtClp.toFixed(2))
     : null;
   const fonteKwht = kwhtClpReal != null ? 'CLP' : (kwhtCalc != null ? 'calculado' : null);
 

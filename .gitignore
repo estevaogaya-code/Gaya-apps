@@ -1,0 +1,22 @@
+# Dados gerados pelo dashboard em produção — NUNCA versionar (ficam só no servidor)
+historico.json
+log_alarmes.json
+limites_alarmes.json
+producao.json
+turno_corrente.json
+sacos.json
+min_total_dia_state.json
+ton_total_dia_state.json
+energia_clp_state.json
+coleta_processo_corrente.json
+coleta_processo_anterior.json
+backups_payload/
+receitas_presets.json
+receitas_log.jsonl
+*.tmp
+
+# Dependências e arquivos locais
+node_modules/
+*.log
+*.bak*
+server.js.bak*

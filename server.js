@@ -1170,6 +1170,76 @@ async function sincronizarBoletimFirebase() {
   }
 }
 
+// Resincroniza energia/minutos (moinhos[dia].kwhM1/minM1/kwhM2/minM2) de UM
+// dia específico pro Firestore, SEM o filtro de 5 dias do sincronizarBoletimFirebase
+// periódico acima. Existe porque esse filtro cria um buraco: assim que um dia
+// sai da janela de 5 dias, o sync automático nunca mais olha pra ele — então
+// se o kWh local daquele turno só ficou certo DEPOIS (captura tardia do reset
+// do CLP, ou correção manual via /api/producao/turno/:id/corrigir), essa
+// correção nunca chega no Firestore/app Cimento Gaúcho sozinha. Confirmado
+// em outubro/2026: 501 05/10 e 06/10 tinham produção sincronizada certinha
+// mas energia travada em 0 no boletim exportado, enquanto o server já tinha
+// o kWh certo em producao.turnos — exatamente esse buraco.
+async function ressincronizarEnergiaDia(dataDiaStr) {
+  // dataDiaStr: 'DD/MM/YYYY' — mesmo formato de turno.data
+  const turnosDoDia = producao.turnos.filter(t => t.data === dataDiaStr);
+  if (!turnosDoDia.length) return { ok: false, erro: `Nenhum turno encontrado para ${dataDiaStr}` };
+
+  const [diaStr, mesStr, anoStr] = dataDiaStr.split('/');
+  const chaveMes  = `${anoStr}-${mesStr}`;
+  const diaIndex  = parseInt(diaStr, 10) - 1;
+
+  let min1 = 0, kwh1 = 0, min2 = 0, kwh2 = 0;
+  turnosDoDia.forEach(t => {
+    if (t.linha501) { min1 += t.linha501.minRodando || 0; kwh1 += t.linha501.kwh || 0; }
+    if (t.linha502) { min2 += t.linha502.minRodando || 0; kwh2 += t.linha502.kwh || 0; }
+  });
+
+  const payload = await getPayloadFirestore(true); // sempre busca fresco antes de gravar
+  if (!payload || !Array.isArray(payload.months)) {
+    return { ok: false, erro: 'Payload do Firestore vazio ou inválido' };
+  }
+  const mes = payload.months.find(m => m.key === chaveMes);
+  if (!mes || !Array.isArray(mes.moinhos) || !mes.moinhos[diaIndex]) {
+    return { ok: false, erro: `Mês/dia ${dataDiaStr} não existe no payload do Firestore` };
+  }
+
+  const antes = { ...mes.moinhos[diaIndex] };
+  mes.moinhos[diaIndex].minM1 = Math.round(min1);
+  mes.moinhos[diaIndex].kwhM1 = parseFloat(kwh1.toFixed(1));
+  mes.moinhos[diaIndex].minM2 = Math.round(min2);
+  mes.moinhos[diaIndex].kwhM2 = parseFloat(kwh2.toFixed(1));
+
+  const ok = await pushPayloadFirestore(payload);
+  if (!ok) return { ok: false, erro: 'Falha ao gravar no Firestore (ver log [FIRESTORE] no console)' };
+
+  console.log(`[SYNC] Resync manual de energia — ${dataDiaStr}: M1=${Math.round(min1)}min/${kwh1.toFixed(1)}kWh, M2=${Math.round(min2)}min/${kwh2.toFixed(1)}kWh`);
+  return {
+    ok: true,
+    data: dataDiaStr,
+    antes:  { minM1: antes.minM1 ?? null, kwhM1: antes.kwhM1 ?? null, minM2: antes.minM2 ?? null, kwhM2: antes.kwhM2 ?? null },
+    depois: { minM1: mes.moinhos[diaIndex].minM1, kwhM1: mes.moinhos[diaIndex].kwhM1, minM2: mes.moinhos[diaIndex].minM2, kwhM2: mes.moinhos[diaIndex].kwhM2 },
+  };
+}
+
+// POST /api/producao/dia/:data/ressincronizar-energia — :data em DD-MM-YYYY
+// (hífen em vez de barra, pra não precisar de URL-encode). Uso: corrigir
+// manualmente um dia antigo cuja energia ficou errada/zerada no boletim do
+// app Cimento Gaúcho mesmo com o dado certo já salvo no server (ver
+// comentário de ressincronizarEnergiaDia acima pra entender a causa).
+app.post('/api/producao/dia/:data/ressincronizar-energia', async (req, res) => {
+  const m = req.params.data.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (!m) return res.status(400).json({ erro: 'data deve estar no formato DD-MM-YYYY' });
+  const dataDiaStr = `${m[1]}/${m[2]}/${m[3]}`;
+  try {
+    const resultado = await ressincronizarEnergiaDia(dataDiaStr);
+    if (!resultado.ok) return res.status(400).json(resultado);
+    res.json(resultado);
+  } catch (e) {
+    res.status(500).json({ ok: false, erro: e.message });
+  }
+});
+
 app.get('/api/indicadores/:linha', async (req, res) => {
   const ln = req.params.linha;
   if (!['501','502'].includes(ln)) return res.status(400).json({ erro: 'Linha inválida' });
@@ -2506,6 +2576,16 @@ app.post('/api/producao/turno/:id/corrigir', (req, res) => {
 
   console.log(`[ADMIN] Correção manual em turno ${turno.id} (${chaveLinha}):`, alterado);
   salvarProducaoAsync();
+
+  // Corrigiu kwh/minRodando de uma linha (não 'total')? Resincroniza esse dia
+  // no Firestore AGORA, sem esperar o sync periódico — que, se o turno tiver
+  // mais de 5 dias, nunca mais olharia pra ele sozinho (ver ressincronizarEnergiaDia).
+  if (linha !== 'total' && (alterado.kwh || alterado.minRodando)) {
+    ressincronizarEnergiaDia(turno.data)
+      .then(r => { if (!r.ok) console.error('[SYNC] Resync pós-correção falhou:', r.erro); })
+      .catch(e => console.error('[SYNC] Resync pós-correção falhou:', e.message));
+  }
+
   res.json({ ok: true, turnoId: turno.id, linha: chaveLinha, alterado });
 });
 

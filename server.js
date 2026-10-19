@@ -1244,7 +1244,7 @@ async function sincronizarBoletimFirebase() {
 
     // Energia/minutos: corte da janela na MEIA-NOITE, para os dois turnos de uma
     // data entrarem ou saírem juntos. Com o corte "agora − 5 dias" o diurno
-    // (07:00) saía da janela 11 h antes do noturno (18:00) e, nesse intervalo,
+    // (07:01) saía da janela 11 h antes do noturno (18:01) e, nesse intervalo,
     // a soma do dia virava só o noturno e era gravada por cima do total certo —
     // e a data congelava assim (ex.: 501 em 01/10: 6.014 kWh em vez de 12.527).
     const dLim = new Date(limiteAntigo);

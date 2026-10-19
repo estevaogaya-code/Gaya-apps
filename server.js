@@ -718,7 +718,7 @@ async function pushPayloadFirestore(payload) {
 // ── Especificações de qualidade por produto (mesma lógica do cimento_gaucho.html) ──
 const QUALIDADE_SPECS = {
   'CPIV':    { malhaMax: 5, blaineMin: 4200, blaineMax: 5500 },
-  'Pozomix': { malhaMax: 2, blaineMin: 5000, blaineMax: 6000 },
+  'Pozomix': { malhaMax: null, blaineMin: 5000, blaineMax: 6000 }, // malha do Pozomix NÃO entra no OEE (só Blaine)
   'CPII-Z':  { malhaMax: 3, blaineMin: 4500, blaineMax: 5500 },
 };
 function classRecQ(receita) {
@@ -730,7 +730,7 @@ function classRecQ(receita) {
 }
 function numOrNullQ(v) { const n = parseFloat(v); return isNaN(n) ? null : n; }
 function qualScoreMalha(malha, spec) {
-  if (malha == null || !spec) return null;
+  if (malha == null || !spec || spec.malhaMax == null) return null; // produto sem limite de malha (Pozomix): malha fora da nota
   if (malha <= spec.malhaMax) return 1;
   return Math.max(0, 1 - (malha - spec.malhaMax) / spec.malhaMax);
 }

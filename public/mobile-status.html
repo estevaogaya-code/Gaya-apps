@@ -601,26 +601,27 @@
       arquivoSufixo = ano + '-' + String(mesNum).padStart(2,'0');
     }
 
+    var q = 'inicio='+inicio+'&fim='+fim;
+    function get(url, vazio){ return fetch(url).then(function(r){return r.json();}).catch(function(){return vazio;}); }
+
     Promise.all([
-      fetch('/api/boletim/501?inicio='+inicio+'&fim='+fim+'&nominal='+nominal).then(function(r){return r.json();}),
-      fetch('/api/boletim/502?inicio='+inicio+'&fim='+fim+'&nominal='+nominal).then(function(r){return r.json();}),
-      tipo === 'mensal'
-        ? fetch('/api/boletim/501/dias?inicio='+inicio+'&fim='+fim).then(function(r){return r.json();}).catch(function(){return {dias:[]};})
-        : Promise.resolve({dias:[]}),
-      tipo === 'mensal'
-        ? fetch('/api/boletim/502/dias?inicio='+inicio+'&fim='+fim).then(function(r){return r.json();}).catch(function(){return {dias:[]};})
-        : Promise.resolve({dias:[]}),
-      // Produção POR PRODUTO (junta os dois moinhos, agrupado pela receita
-      // real) — complementa a visão por linha/equipamento acima delas.
-      // "T/h médio da Linha X" e "T/h médio do Produto Y" respondem
-      // perguntas diferentes (equipamento vs. receita) e podem divergir de
-      // propósito quando um moinho roda mais de um produto no período.
-      fetch('/api/producao/por-produto?inicio='+inicio+'&fim='+fim).then(function(r){return r.json();}).catch(function(){return {produtos:[]};}),
+      fetch('/api/boletim/501?'+q+'&nominal='+nominal).then(function(r){return r.json();}),
+      fetch('/api/boletim/502?'+q+'&nominal='+nominal).then(function(r){return r.json();}),
+      get('/api/boletim/501/dias?'+q, {dias:[]}),
+      get('/api/boletim/502/dias?'+q, {dias:[]}),
+      get('/api/producao/por-produto?'+q, {produtos:[]}),
+      get('/api/boletim/detalhe?'+q, {dias:[], consumo:{mats:[],dias:[]}}),   // receitas por turno + consumo de MP (Firestore)
     ]).then(function(res){
       var r501 = res[0], r502 = res[1];
       var dias501 = res[2].dias || [], dias502 = res[3].dias || [];
       var porProduto = res[4].produtos || [];
+      var det = res[5] || {dias:[], consumo:{mats:[],dias:[]}};
+      var detDias = det.dias || [];
+      var cons = det.consumo || {mats:[],dias:[]};
+      var N = function(v){ return parseFloat(v)||0; };
       var doc = new jspdf.jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
+      var baseTab = { headStyles:{ fillColor:[33,38,45] }, styles:{ fontSize:8.5, halign:'center' }, margin:{ left:14, right:14 } };
+      function tab(o){ var x={}, k; for(k in baseTab) x[k]=baseTab[k]; for(k in o) x[k]=o[k]; doc.autoTable(x); }
 
       doc.setFontSize(16); doc.setFont(undefined,'bold');
       doc.text('Boletim de Produção — Moagem Cimento Gaúcho', 14, 16);
@@ -646,21 +647,17 @@
         ];
       }
 
-      doc.autoTable({
-        startY: 34,
+      tab({
+        startY: 34, theme:'grid',
         head: [['Linha','Produção','t/h médio','Energia','kW/t','Rodando','Disponib.','Performance','Qualidade','OEE']],
         body: [ linhaOEE(r501,'501'), linhaOEE(r502,'502') ],
-        theme:'grid',
-        headStyles:{ fillColor:[33,38,45] },
-        styles:{ fontSize:8.5, halign:'center' },
         columnStyles:{ 0:{ halign:'left', fontStyle:'bold' } },
-        margin:{ left:14, right:14 },
       });
 
       var cobertura501 = r501.qualidadeDias!=null ? ('501: '+r501.qualidadeDias+'/'+(r501.qualidadeDiasPeriodo||0)+' dia(s)') : '';
       var cobertura502 = r502.qualidadeDias!=null ? ('502: '+r502.qualidadeDias+'/'+(r502.qualidadeDiasPeriodo||0)+' dia(s)') : '';
       doc.setFontSize(7.5); doc.setTextColor(130);
-      doc.text('Qualidade calculada a partir de malha/Blaine lançados no estoque-cimento-gaucho — cobertura: '+cobertura501+'  '+cobertura502, 14, doc.lastAutoTable.finalY + 5);
+      doc.text('Qualidade calculada a partir de malha/Blaine lançados no app (Pozomix: só Blaine) — cobertura: '+cobertura501+'  '+cobertura502+'\n(dias com medição / dias com produção)', 14, doc.lastAutoTable.finalY + 5);
       doc.setTextColor(0);
 
       var cabecalhoQualidade, corpoQualidade;
@@ -669,10 +666,10 @@
         corpoQualidade = [];
         [[r501,'501'],[r502,'502']].forEach(function(par){
           var r = par[0], ln = par[1];
-          var det = (r.qualidadeDetalhe||[])[0];
-          if (!det) { corpoQualidade.push([ln,'—','sem lançamento no estoque-cimento-gaucho','—','—']); return; }
-          corpoQualidade.push([ln,'Diurno', det.receitaD||'—', det.dMalha!=null?fmtN(det.dMalha,2):'—', det.dBlaine!=null?Math.round(det.dBlaine):'—']);
-          corpoQualidade.push([ln,'Noturno', det.receitaN||'—', det.nMalha!=null?fmtN(det.nMalha,2):'—', det.nBlaine!=null?Math.round(det.nBlaine):'—']);
+          var dt = (r.qualidadeDetalhe||[])[0];
+          if (!dt) { corpoQualidade.push([ln,'—','sem lançamento no app Cimento Gaúcho','—','—']); return; }
+          corpoQualidade.push([ln,'Diurno', dt.receitaD||'—', dt.dMalha!=null?fmtN(dt.dMalha,2):'—', dt.dBlaine!=null?Math.round(dt.dBlaine):'—']);
+          corpoQualidade.push([ln,'Noturno', dt.receitaN||'—', dt.nMalha!=null?fmtN(dt.nMalha,2):'—', dt.nBlaine!=null?Math.round(dt.nBlaine):'—']);
         });
       } else {
         cabecalhoQualidade = [['Linha','Malha média (%)','Blaine médio (cm²/g)','Dias com medição']];
@@ -681,121 +678,123 @@
           ['502', r502.malhaMedia!=null?fmtN(r502.malhaMedia,2):'—', r502.blaineMedia!=null?r502.blaineMedia:'—', (r502.qualidadeDias||0)+'/'+(r502.qualidadeDiasPeriodo||0)],
         ];
       }
-
-      doc.autoTable({
-        startY: doc.lastAutoTable.finalY + 10,
-        head: cabecalhoQualidade,
-        body: corpoQualidade,
-        theme:'striped',
-        headStyles:{ fillColor:[33,38,45] },
-        styles:{ fontSize:8.5, halign:'center' },
+      tab({
+        startY: doc.lastAutoTable.finalY + 10, theme:'striped',
+        head: cabecalhoQualidade, body: corpoQualidade,
         columnStyles:{ 0:{ halign:'left', fontStyle:'bold' }, 2:{ halign:'left' } },
-        margin:{ left:14, right:14 },
       });
 
       doc.setFontSize(8); doc.setTextColor(120);
       doc.text(
-        'OEE = Disponibilidade x Performance x Qualidade (malha/Blaine do estoque-cimento-gaucho).\n' +
-        'Quando um dia do periodo nao tem malha/Blaine lancado, a coluna Qualidade usa apenas os dias\n' +
-        'com medicao (ver cobertura acima). Se nao houver nenhum dia com medicao, o OEE exibido cai\n' +
-        'para o parcial (Disponibilidade x Performance), marcado como "(parcial)".',
+        'OEE = Disponibilidade x Performance x Qualidade (malha/Blaine lançados no app; malha do Pozomix não entra).\n' +
+        'Dias sem minutos lançados não entram no OEE; dia sem malha/Blaine não entra na Qualidade.\n' +
+        'Se nenhum dia tem medição, o OEE exibido é o parcial (Disponibilidade x Performance), marcado "(parcial)".',
         14, doc.lastAutoTable.finalY + 8
       );
       doc.setTextColor(0);
 
-      // ── Produção por Produto (complementa a visão por linha acima) ──────
-      // Junta os dois moinhos, agrupado pela receita real de cada
-      // meio-turno — responde "quanto rendeu cada produto" em vez de
-      // "quanto rendeu cada equipamento". As duas visões podem divergir de
-      // propósito quando um moinho roda mais de um produto no período.
-      if (tipo === 'mensal' && porProduto.length) {
+      // ── Produção por Produto (por receita real de cada turno) ──
+      if (porProduto.length) {
         doc.setFontSize(12); doc.setFont(undefined,'bold');
-        doc.text('Produção por Produto (501+502 juntos, por receita)', 14, doc.lastAutoTable.finalY + 16);
+        doc.text('Produção por Produto (501+502 juntos, por receita)', 14, doc.lastAutoTable.finalY + 26);
         doc.setFont(undefined,'normal');
-        doc.autoTable({
-          startY: doc.lastAutoTable.finalY + 20,
+        tab({
+          startY: doc.lastAutoTable.finalY + 30, theme:'striped',
           head: [['Produto','Produção (t)','T/h Médio']],
-          body: porProduto.map(function(p){
-            return [p.produto, fmtN(p.tonTotal,1), p.thMedio!=null?fmtN(p.thMedio,2):'—'];
-          }),
-          theme:'striped',
-          headStyles:{ fillColor:[33,38,45] },
-          styles:{ fontSize:8.5, halign:'center' },
+          body: porProduto.map(function(p){ return [p.produto, fmtN(p.tonTotal,1), p.thMedio!=null?fmtN(p.thMedio,2):'—']; }),
           columnStyles:{ 0:{ halign:'left', fontStyle:'bold' } },
-          margin:{ left:14, right:14 },
         });
         doc.setFontSize(7.5); doc.setTextColor(130);
-        doc.text('T/h médio aqui é por RECEITA (soma dos dois moinhos) — diferente do T/h médio por LINHA da tabela acima, que é por equipamento.', 14, doc.lastAutoTable.finalY + 5);
+        doc.text('T/h médio aqui é por RECEITA (soma dos moinhos) — diferente do T/h médio por LINHA da tabela acima, que é por equipamento.', 14, doc.lastAutoTable.finalY + 5);
         doc.setTextColor(0);
       }
 
-      // ── Detalhamento por dia (só no boletim mensal) — o total acima
-      // continua igual; isso soma o mesmo período mas abre dia a dia, cada
-      // um com seus próprios números independentes (não é acumulado).
-      if (tipo === 'mensal' && (dias501.length || dias502.length)) {
-        [[dias501,'501'],[dias502,'502']].forEach(function(par){
-          var dias = par[0], ln = par[1];
-          if (!dias.length) return;
-          doc.addPage();
-          doc.setFontSize(13); doc.setFont(undefined,'bold');
-          doc.text('Detalhamento por Dia — Linha ' + ln, 14, 16);
-          doc.setFont(undefined,'normal');
-          doc.setFontSize(9); doc.setTextColor(120);
-          doc.text('Cada linha é o total daquele dia (diurno + noturno), de forma independente.', 14, 22);
-          doc.setTextColor(0);
-
-          var corpoDias = dias.map(function(d){
-            return [d.data, fmtN(d.tonProduzida,1), d.thMedia!=null?fmtN(d.thMedia,2):'—', fmtN(d.kwh,0), Math.round(d.minRodando)];
-          });
-          var totalTon = dias.reduce(function(s,d){ return s+d.tonProduzida; }, 0);
-          var totalKwh = dias.reduce(function(s,d){ return s+d.kwh; }, 0);
-          var totalMin = dias.reduce(function(s,d){ return s+d.minRodando; }, 0);
-          corpoDias.push(['TOTAL', fmtN(totalTon,1), '—', fmtN(totalKwh,0), totalMin]);
-
-          doc.autoTable({
-            startY: 28,
-            head: [['Data','Produção (t)','T/h Médio','Energia (kWh)','Min. Rodando']],
-            body: corpoDias,
-            theme:'striped',
-            headStyles:{ fillColor:[33,38,45] },
-            styles:{ fontSize:8.5, halign:'center' },
-            columnStyles:{ 0:{ halign:'left', fontStyle:'bold' } },
-            margin:{ left:14, right:14 },
-            didParseCell: function(data){
-              if (data.row.index === corpoDias.length-1) data.cell.styles.fontStyle = 'bold';
-            },
-          });
-
-          // ── Gráficos da mesma tabela — sem requisição nova, só desenha
-          //    em cima de "dias" que já foi buscado acima. Página própria
-          //    com posição fixa, pra não depender da altura da tabela
-          //    (que varia de 28 a 31 dias) e estourar o fim da página.
-          var labelsDias = dias.map(function(d){ return d.data.split('/')[0]; }); // só o dia (DD)
-          var valoresProd = dias.map(function(d){ return d.tonProduzida; });
-          var valoresKwh  = dias.map(function(d){ return d.kwh; });
-
-          doc.addPage();
-          doc.setFontSize(13); doc.setFont(undefined,'bold');
-          doc.text('Gráfico — Linha ' + ln, 14, 16);
-          doc.setFont(undefined,'normal');
-
-          var imgProdDia = desenharGraficoBarras(labelsDias,
-            [{ nome:'Produção (t)', cor: ln==='501' ? '#3b82f6' : '#f59e0b', valores:valoresProd }],
-            { w:720, h:230, casas:1 });
-          doc.setFontSize(10); doc.text('Produção por dia (t)', 14, 26);
-          doc.addImage(imgProdDia, 'PNG', 14, 29, 182, 58);
-
-          var imgKwhDia = desenharGraficoBarras(labelsDias,
-            [{ nome:'Energia (kWh)', cor:'#10b981', valores:valoresKwh }],
-            { w:720, h:230, casas:0 });
-          doc.setFontSize(10); doc.text('Energia por dia (kWh)', 14, 94);
-          doc.addImage(imgKwhDia, 'PNG', 14, 97, 182, 58);
-        });
+      // ── Detalhamento por dia — com a RECEITA de cada turno rodado ──
+      // Totais do dia (t, t/h, kWh, min) vêm do CLP (/dias); receita, produção
+      // por turno e malha/Blaine vêm do app (/detalhe). "—" = turno sem produção.
+      function par(a, b, d){
+        var x = (a!=null) ? fmtN(a,d) : '—', y = (b!=null) ? fmtN(b,d) : '—';
+        return (x==='—' && y==='—') ? '—' : x+' / '+y;
       }
+      var chDia = function(dataFull){ return dataFull.split('/').slice(0,2).join('/'); };
+      var temCpiiz = detDias.some(function(d){ return d.cpiiz && (N(d.cpiiz.dProd)+N(d.cpiiz.nProd)) > 0; });
+      var blocos = [
+        { nome:'501', cor:'#3b82f6', dias:dias501, kwh:true },
+        { nome:'502', cor:'#f59e0b', dias:dias502, kwh:true },
+      ];
+      if (temCpiiz) blocos.push({ nome:'CPII-Z', cor:'#64748b', dias:[], kwh:false });
 
-      // ── Dashboard Visual — usa os MESMOS r501/r502 já buscados acima,
-      //    nenhuma requisição nova. Gráficos gerados em canvas e embutidos
-      //    como imagem no PDF.
+      blocos.forEach(function(L){
+        var porData = {};
+        (L.dias||[]).forEach(function(d){ porData[chDia(d.data)] = d; });
+        var lista = [];
+        detDias.forEach(function(dd){
+          var key = L.nome==='CPII-Z' ? 'cpiiz' : L.nome;
+          var r = dd[key] || null;
+          var c = porData[dd.data] || null;
+          var tonApp = r ? N(r.dProd)+N(r.nProd) : 0;
+          if (!c && tonApp <= 0) return;                       // sem produção neste dia
+          lista.push({ data: dd.data, r: r || {}, c: c, tonApp: tonApp });
+        });
+        // dias que só existem no /dias (ex.: app sem lançamento ainda)
+        (L.dias||[]).forEach(function(c){
+          var k = chDia(c.data);
+          if (!lista.some(function(x){ return x.data===k; })) lista.push({ data:k, r:{}, c:c, tonApp:0 });
+        });
+        lista.sort(function(a,b){ return a.data.split('/').reverse().join('').localeCompare(b.data.split('/').reverse().join('')); });
+        if (!lista.length) return;
+
+        doc.addPage();
+        doc.setFontSize(13); doc.setFont(undefined,'bold');
+        doc.text('Detalhamento por Dia — Linha ' + L.nome, 14, 16);
+        doc.setFont(undefined,'normal'); doc.setFontSize(9); doc.setTextColor(120);
+        doc.text('Cada linha é o total daquele dia (diurno + noturno). Receita e produção de cada turno rodado; "—" = turno sem produção.', 14, 22);
+        doc.setTextColor(0);
+
+        var corpo = lista.map(function(x){
+          var r = x.r, rodD = N(r.dProd)>0, rodN = N(r.nProd)>0, c = x.c;
+          var totalDia = c ? N(c.tonProduzida) : x.tonApp;
+          return [x.data,
+                  rodD ? (r.receitaD||'—') : '—', rodD ? fmtN(N(r.dProd),1) : '—',
+                  rodN ? (r.receitaN||'—') : '—', rodN ? fmtN(N(r.nProd),1) : '—',
+                  fmtN(totalDia,1),
+                  c && c.thMedia!=null ? fmtN(c.thMedia,2) : '—',
+                  L.kwh ? (c ? fmtN(c.kwh,0) : '—') : '—',
+                  L.kwh ? (c ? Math.round(c.minRodando) : '—') : '—',
+                  par(r.dMalha, r.nMalha, 1), par(r.dBlaine, r.nBlaine, 0)];
+        });
+        var tTon = lista.reduce(function(s,x){ return s + (x.c ? N(x.c.tonProduzida) : x.tonApp); },0);
+        var tKwh = lista.reduce(function(s,x){ return s + (x.c ? N(x.c.kwh) : 0); },0);
+        var tMin = lista.reduce(function(s,x){ return s + (x.c ? N(x.c.minRodando) : 0); },0);
+        var tD = lista.reduce(function(s,x){ return s + N(x.r.dProd); },0);
+        var tN = lista.reduce(function(s,x){ return s + N(x.r.nProd); },0);
+        corpo.push(['TOTAL','',fmtN(tD,1),'',fmtN(tN,1),fmtN(tTon,1),'—', L.kwh?fmtN(tKwh,0):'—', L.kwh?Math.round(tMin):'—','','']);
+
+        tab({
+          startY: 28, theme:'striped',
+          head: [['Data','Receita Diurno','t Dia','Receita Noturno','t Noite','Total (t)','T/h','Energia (kWh)','Min. Rod.','Malha D / N','Blaine D / N']],
+          body: corpo, styles:{ fontSize:7.2, halign:'center', cellPadding:1 }, margin:{ left:10, right:10 },
+          columnStyles:{ 0:{ halign:'left', fontStyle:'bold', cellWidth:14 }, 1:{ halign:'left' }, 3:{ halign:'left' } },
+          didParseCell: function(d){ if (d.row.index === corpo.length-1) d.cell.styles.fontStyle = 'bold'; },
+        });
+
+        // gráficos da linha (só mensal, 501/502)
+        if (tipo === 'mensal' && L.kwh) {
+          var labels = lista.map(function(x){ return x.data.split('/')[0]; });
+          doc.addPage();
+          doc.setFontSize(13); doc.setFont(undefined,'bold');
+          doc.text('Gráfico — Linha ' + L.nome, 14, 16);
+          doc.setFont(undefined,'normal');
+          var imgP = desenharGraficoBarras(labels, [{ nome:'Produção (t)', cor:L.cor, valores:lista.map(function(x){ return x.c ? N(x.c.tonProduzida) : x.tonApp; }) }], { w:720, h:230, casas:1 });
+          doc.setFontSize(10); doc.text('Produção por dia (t)', 14, 26);
+          doc.addImage(imgP, 'PNG', 14, 29, 182, 58);
+          var imgK = desenharGraficoBarras(labels, [{ nome:'Energia (kWh)', cor:'#10b981', valores:lista.map(function(x){ return x.c ? N(x.c.kwh) : 0; }) }], { w:720, h:230, casas:0 });
+          doc.text('Energia por dia (kWh)', 14, 94);
+          doc.addImage(imgK, 'PNG', 14, 97, 182, 58);
+        }
+      });
+
+      // ── Dashboard Visual ──
       doc.addPage();
       doc.setFontSize(13); doc.setFont(undefined,'bold');
       doc.text('Dashboard Visual', 14, 16);
@@ -818,12 +817,8 @@
 
       var imgIndic = desenharGraficoBarras(['Disponib.','Performance','Qualidade','OEE'],
         [
-          { nome:'501', cor:'#3b82f6', valores:[
-              r501.disponibilidade||0, r501.performance||0, r501.qualidade||0,
-              (r501.oeeCompleto!=null?r501.oeeCompleto:r501.oee)||0 ] },
-          { nome:'502', cor:'#f59e0b', valores:[
-              r502.disponibilidade||0, r502.performance||0, r502.qualidade||0,
-              (r502.oeeCompleto!=null?r502.oeeCompleto:r502.oee)||0 ] },
+          { nome:'501', cor:'#3b82f6', valores:[ r501.disponibilidade||0, r501.performance||0, r501.qualidade||0, (r501.oeeCompleto!=null?r501.oeeCompleto:r501.oee)||0 ] },
+          { nome:'502', cor:'#f59e0b', valores:[ r502.disponibilidade||0, r502.performance||0, r502.qualidade||0, (r502.oeeCompleto!=null?r502.oeeCompleto:r502.oee)||0 ] },
         ],
         { w:520, h:260, casas:0, maxFixo:100 });
       doc.text('Indicadores (%)', 14, 88);
@@ -831,21 +826,55 @@
 
       if (tipo === 'mensal') {
         var imgQual = desenharGraficoBarras(['501','502'],
-          [
-            { nome:'Malha média (%)', cor:'#10b981', valores:[r501.malhaMedia||0, r502.malhaMedia||0] },
-          ],
+          [{ nome:'Malha média (%)', cor:'#10b981', valores:[r501.malhaMedia||0, r502.malhaMedia||0] }],
           { w:480, h:200, casas:2 });
         doc.text('Malha média (%)', 14, 190);
         doc.addImage(imgQual, 'PNG', 14, 193, 88, 40);
 
         var imgBlaine = desenharGraficoBarras(['501','502'],
-          [
-            { nome:'Blaine médio (cm²/g)', cor:'#8b5cf6', valores:[r501.blaineMedia||0, r502.blaineMedia||0] },
-          ],
+          [{ nome:'Blaine médio (cm²/g)', cor:'#8b5cf6', valores:[r501.blaineMedia||0, r502.blaineMedia||0] }],
           { w:480, h:200, casas:0 });
         doc.text('Blaine médio (cm²/g)', 108, 190);
         doc.addImage(imgBlaine, 'PNG', 108, 193, 88, 40);
       }
+
+      // ── Consumo de matéria-prima por data + TOTAL no final ──
+      var mats = cons.mats || [], consDias = cons.dias || [];
+      doc.addPage();
+      doc.setFontSize(13); doc.setFont(undefined,'bold');
+      doc.text('Consumo de Matéria-Prima por Data (t)', 14, 16);
+      doc.setFont(undefined,'normal'); doc.setFontSize(9); doc.setTextColor(120);
+      doc.text('Consumo calculado = produção de cada turno × proporção da receita (linhas 501 e 502' + (temCpiiz ? ' e CPII-Z' : '') + '), mesma regra da aba Estoque.', 14, 22);
+      doc.setTextColor(0);
+      if (!consDias.length || !mats.length) {
+        doc.setFontSize(10); doc.text('Sem consumo calculado no período (verifique receitas/produção no app).', 14, 32);
+      } else {
+        var totMat = {}, totGeral = 0;
+        var corpoC = consDias.map(function(d){
+          var totDia = mats.reduce(function(s,n){ return s + (d.tot[n]||0); }, 0);
+          mats.forEach(function(n){ totMat[n] = (totMat[n]||0) + (d.tot[n]||0); });
+          totGeral += totDia;
+          return [d.data].concat(mats.map(function(n){ return d.tot[n] ? fmtN(d.tot[n],1) : '—'; }), [fmtN(totDia,1)]);
+        });
+        corpoC.push(['TOTAL'].concat(mats.map(function(n){ return fmtN(totMat[n]||0,1); }), [fmtN(totGeral,1)]));
+        corpoC.push(['% do total'].concat(mats.map(function(n){ return totGeral>0 ? fmtN((totMat[n]||0)/totGeral*100,1)+'%' : '—'; }), ['100%']));
+        tab({
+          startY: 28, theme:'striped',
+          head: [['Data'].concat(mats, ['Total do dia'])], body: corpoC,
+          styles:{ fontSize: mats.length>6 ? 7.5 : 8.5, halign:'center', cellPadding:1.1 },
+          columnStyles:{ 0:{ halign:'left', fontStyle:'bold' } },
+          didParseCell: function(d){
+            var n = corpoC.length;
+            if (d.section==='body' && d.row.index===n-2){ d.cell.styles.fontStyle='bold'; d.cell.styles.fillColor=[226,232,240]; }
+            if (d.section==='body' && d.row.index===n-1){ d.cell.styles.fontStyle='italic'; d.cell.styles.textColor=[90,90,90]; }
+          },
+        });
+      }
+
+      // paginação
+      var np = doc.getNumberOfPages();
+      for (var p=1; p<=np; p++){ doc.setPage(p); doc.setFontSize(8); doc.setTextColor(130); doc.text('Página '+p+' de '+np, 196, 290, { align:'right' }); }
+      doc.setTextColor(0);
 
       doc.save('boletim_producao_'+tipo+'_'+arquivoSufixo+'.pdf');
     }).catch(function(e){

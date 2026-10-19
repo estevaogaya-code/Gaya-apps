@@ -1203,27 +1203,20 @@ app.get('/api/boletim/:linha/dias', (req, res) => {
 });
 
 // ─── Sincronização automática com o Firestore (cimento_gaucho.html) ───────
-// Faz UM fetch e UM push por ciclo. Só considera turnos JÁ FECHADOS de
-// producao.turnos (turno em andamento fica em turnoCorrente e não entra
-// aqui) para o boletim — proposital: o turno noturno (18h–07h) atravessa a
-// meia-noite, então só dá pra saber o total certo do dia depois que ele
-// fecha. Agrupa por (mês, dia, moinho) usando SEMPRE a data de início do
-// turno — a mesma convenção que o cimento_gaucho.html já usa pra nProd
-// (turno noturno pertence ao dia em que começou às 18h, não ao dia em que
+// Faz UM fetch e UM push por ciclo. Agrupa por (mês, dia, moinho) usando
+// SEMPRE a data de início do turno — a mesma convenção do cimento_gaucho.html
+// (turno noturno pertence ao dia em que começou às 18:01, não ao dia em que
 // termina).
 //
 // 1) Minutos rodando / kWh do dia (moinhos[dia].minM1/kwhM1/minM2/kwhM2) —
-//    soma diurno+noturno fechados daquele dia; sempre sobrescreve (só
-//    alimenta OEE/gráficos, não afeta estoque).
+//    soma diurno+noturno de producao.turnos, em todas as datas da retenção.
 //
-// 2) Produção por turno (m1[dia].dProd/dTh e nProd/nTh, idem para m2) —
-//    atualiza ao vivo, igual o boletim, ENQUANTO o turno é o que está em
-//    andamento (mesmo id de turnoCorrente.key): sobrescreve a cada ciclo com
-//    o checkpoint mais recente de producao.turnos. Assim que o turno muda
-//    (fecha de verdade), a automação para de tocar naquele dia/campo pra
-//    sempre — dali em diante é só edição manual (útil pra corrigir eventual
-//    divergência entre o último checkpoint e o valor final do CLP).
-//    malha/Blaine/receita continuam manuais — o CLP não mede isso.
+// 2) Produção por turno (m1[dia].dProd/dTh e nProd/nTh, idem para m2) — o
+//    registro do turno em producao.turnos (turno em andamento: último
+//    checkpoint). Também em todas as datas da retenção: o servidor é a fonte
+//    de minutos, energia e produção; edição manual desses campos no app é
+//    sobrescrita (corrigir pelo /api/producao/turno/:id/corrigir).
+//    Só grava o campo cujo valor mudou. malha/Blaine/receita não são tocados.
 //
 // 3) Sacos Gaúcho 50kg (ensacadeira[dia].gaucho50) — mesmo princípio da
 //    Produção: atualiza ao vivo enquanto o dia é HOJE, com uma graça de
@@ -1239,78 +1232,61 @@ async function sincronizarBoletimFirebase() {
       return;
     }
 
-    const limiteAntigo = Date.now() - 5 * 86400000; // só turnos dos últimos 5 dias
-    const turnosRecentes = producao.turnos.filter(t => t.inicio >= limiteAntigo);
-
-    // Energia/minutos: corte da janela na MEIA-NOITE, para os dois turnos de uma
-    // data entrarem ou saírem juntos. Com o corte "agora − 5 dias" o diurno
-    // (07:01) saía da janela 11 h antes do noturno (18:01) e, nesse intervalo,
-    // a soma do dia virava só o noturno e era gravada por cima do total certo —
-    // e a data congelava assim (ex.: 501 em 01/10: 6.014 kWh em vez de 12.527).
-    const dLim = new Date(limiteAntigo);
-    const limiteDia = new Date(dLim.getFullYear(), dLim.getMonth(), dLim.getDate() + 1).getTime();
-    const turnosEnergia = producao.turnos.filter(t => t.inicio >= limiteDia);
-
-    // Agrupa por "chaveMes|dataDia" somando diurno+noturno de cada moinho
-    const somaPorDia = {}; // { 'YYYY-MM|DD/MM': { min1,kwh1,min2,kwh2 } }
-    turnosEnergia.forEach(t => {
+    // Minutos, kWh e produção vêm SEMPRE dos turnos gravados pelo servidor
+    // (producao.turnos, ~45 dias) — o Firestore só guarda receita/malha/Blaine,
+    // que não são tocados aqui. Todas as datas da retenção são regravadas (não
+    // só os últimos 5 dias), mas só o campo cujo valor mudou. A data mais antiga
+    // é ignorada: o corte de 90 registros pode ter levado só um dos dois turnos.
+    const chaveDe = t => {
       const d = new Date(t.inicio);
-      const chaveMesT = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-      const dataDia   = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
+      return {
+        chaveMesT: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`,
+        dataDia:   `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`,
+        diaMs:     new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(),
+      };
+    };
+    const diaMaisAntigo = producao.turnos.reduce((m, t) => Math.min(m, chaveDe(t).diaMs), Infinity);
+    const turnosSync = producao.turnos.filter(t => chaveDe(t).diaMs > diaMaisAntigo);
+
+    let algumaCoisaMudou = false;
+    const definir = (obj, campo, valor) => {
+      if (obj[campo] === valor) return false;
+      obj[campo] = valor;
+      algumaCoisaMudou = true;
+      return true;
+    };
+
+    // 1) Minutos/kWh por dia = soma diurno + noturno (data de início do turno)
+    const somaPorDia = {}; // { 'YYYY-MM|DD/MM': { min1,kwh1,min2,kwh2 } }
+    turnosSync.forEach(t => {
+      const { chaveMesT, dataDia } = chaveDe(t);
       const key = `${chaveMesT}|${dataDia}`;
       if (!somaPorDia[key]) somaPorDia[key] = { chaveMesT, dataDia, min1: 0, kwh1: 0, min2: 0, kwh2: 0 };
       if (t.linha501) { somaPorDia[key].min1 += t.linha501.minRodando || 0; somaPorDia[key].kwh1 += t.linha501.kwh || 0; }
       if (t.linha502) { somaPorDia[key].min2 += t.linha502.minRodando || 0; somaPorDia[key].kwh2 += t.linha502.kwh || 0; }
     });
 
-    let algumaCoisaMudou = false;
-
-    // 1) Minutos/kWh por dia (soma dos turnos fechados daquele dia) --------
     const atualizados = [];
     for (const key in somaPorDia) {
       const s = somaPorDia[key];
       const mes = payload.months.find(m => m.key === s.chaveMesT);
       if (!mes || !Array.isArray(mes.moinhos)) continue;
-      const [dia] = s.dataDia.split('/');
-      const diaIndex = parseInt(dia, 10) - 1;
-      if (!mes.moinhos[diaIndex]) continue;
-
-      mes.moinhos[diaIndex].minM1 = Math.round(s.min1);
-      mes.moinhos[diaIndex].kwhM1 = parseFloat(s.kwh1.toFixed(1));
-      mes.moinhos[diaIndex].minM2 = Math.round(s.min2);
-      mes.moinhos[diaIndex].kwhM2 = parseFloat(s.kwh2.toFixed(1));
-      algumaCoisaMudou = true;
-      atualizados.push(`${s.chaveMesT} ${s.dataDia}: M1=${Math.round(s.min1)}min/${s.kwh1.toFixed(1)}kWh, M2=${Math.round(s.min2)}min/${s.kwh2.toFixed(1)}kWh`);
+      const diaIndex = parseInt(s.dataDia.split('/')[0], 10) - 1;
+      const md = mes.moinhos[diaIndex];
+      if (!md) continue;
+      const m1 = definir(md, 'minM1', Math.round(s.min1));
+      const k1 = definir(md, 'kwhM1', parseFloat(s.kwh1.toFixed(1)));
+      const m2 = definir(md, 'minM2', Math.round(s.min2));
+      const k2 = definir(md, 'kwhM2', parseFloat(s.kwh2.toFixed(1)));
+      if (m1 || k1 || m2 || k2) atualizados.push(`${s.chaveMesT} ${s.dataDia}: M1=${Math.round(s.min1)}min/${s.kwh1.toFixed(1)}kWh, M2=${Math.round(s.min2)}min/${s.kwh2.toFixed(1)}kWh`);
     }
-    if (atualizados.length) console.log('[SYNC] Boletim (dias com turno fechado):\n  ' + atualizados.join('\n  '));
+    if (atualizados.length) console.log('[SYNC] Minutos/kWh do dia (turnos do servidor):\n  ' + atualizados.join('\n  '));
 
-    // 2) Produção por turno — sobrescreve ao vivo enquanto é o turno corrente;
-    //    continua sobrescrevendo por mais 30 min DEPOIS da troca de turno
-    //    (07:00-07:30 e 18:00-18:30) — sem essa graça, o ciclo de 15 min quase
-    //    nunca cai exatamente no instante do fechamento, então o valor travava
-    //    até ~15 min defasado do total real do turno (ficava faltando produção
-    //    do fim do turno, ~15t a menos era o sintoma). Passada a janela, trava
-    //    de vez — só edição manual dali em diante.
-    function dentroJanelaGraca() {
-      const agora = horaCLP().data;
-      const hm = agora.getHours() * 60 + agora.getMinutes();
-      return (hm >= 7*60 && hm < 7*60 + 30) || (hm >= 18*60 && hm < 18*60 + 30);
-    }
-    const turnosNaoCorrentes = turnosRecentes.filter(t => t.id !== turnoCorrente.key);
-    const ultimoFechado = turnosNaoCorrentes.length
-      ? turnosNaoCorrentes.reduce((a, b) => (b.inicio > a.inicio ? b : a))
-      : null;
-    const naJanelaGraca = dentroJanelaGraca();
-
+    // 2) Produção por turno (m1/m2[dia].dProd/dTh e nProd/nTh) = registro do
+    //    turno no servidor (o turno em andamento entra com o último checkpoint).
     const preenchidos = [];
-    for (const t of turnosRecentes) {
-      const éCorrente = t.id === turnoCorrente.key;
-      const éUltimoFechadoEmGraca = !éCorrente && ultimoFechado && t.id === ultimoFechado.id && naJanelaGraca;
-      if (!éCorrente && !éUltimoFechadoEmGraca) continue; // já fechou e passou da graça — não mexe mais, só manual
-
-      const d = new Date(t.inicio);
-      const chaveMesT = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-      const dataDia   = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
+    for (const t of turnosSync) {
+      const { chaveMesT, dataDia } = chaveDe(t);
       const mes = payload.months.find(m => m.key === chaveMesT);
       if (!mes) continue;
 
@@ -1324,13 +1300,12 @@ async function sincronizarBoletimFirebase() {
         const row = mes[chaveM].find(r => r.data === dataDia);
         if (!row) return;
 
-        row[fieldProd] = l.tonProduzida;
-        row[fieldTh]   = l.thMedia > 0 ? l.thMedia : null;
-        algumaCoisaMudou = true;
-        preenchidos.push(`${chaveMesT} ${dataDia} ${chaveM} ${t.turno} (${éCorrente ? 'ao vivo' : 'graça pós-fechamento'}): ${fieldProd}=${l.tonProduzida}t ${fieldTh}=${row[fieldTh]}`);
+        const p  = definir(row, fieldProd, l.tonProduzida);
+        const th = definir(row, fieldTh, l.thMedia > 0 ? l.thMedia : null);
+        if (p || th) preenchidos.push(`${chaveMesT} ${dataDia} ${chaveM} ${t.turno}${t.id === turnoCorrente.key ? ' (ao vivo)' : ''}: ${fieldProd}=${l.tonProduzida}t ${fieldTh}=${row[fieldTh]}`);
       });
     }
-    if (preenchidos.length) console.log('[SYNC] Produção (turno em andamento):\n  ' + preenchidos.join('\n  '));
+    if (preenchidos.length) console.log('[SYNC] Produção por turno (turnos do servidor):\n  ' + preenchidos.join('\n  '));
 
     // 3) Sacos Gaúcho 50kg (ensacadeira) — ao vivo enquanto o dia é HOJE. O
     //    contador do CLP (COUNTER_700RF001_U01) só ensaca Gaúcho 50kg —

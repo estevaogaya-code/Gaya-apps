@@ -584,7 +584,6 @@
 
   function exportarBoletimPDF(){
     var tipo = document.getElementById('bol-tipo').value; // 'diario' | 'mensal'
-    var nominal = 30; // capacidade nominal do equipamento (fixo — definido no server, NOMINAL_MOINHO_TH)
     var dataStr = document.getElementById('bol-data').value || new Date().toISOString().slice(0,10);
     var inicio, fim, periodoLabel, arquivoSufixo;
 
@@ -604,19 +603,19 @@
     var q = 'inicio='+inicio+'&fim='+fim;
     function get(url, vazio){ return fetch(url).then(function(r){return r.json();}).catch(function(){return vazio;}); }
 
+    // Mesmos números do boletim do app Cimento Gaúcho: tudo vem do Firestore,
+    // calculado no server com as regras do app (/api/boletim/app). Consumo de MP
+    // continua em /api/boletim/detalhe (também Firestore, mesma regra do app).
     Promise.all([
-      fetch('/api/boletim/501?'+q+'&nominal='+nominal).then(function(r){return r.json();}),
-      fetch('/api/boletim/502?'+q+'&nominal='+nominal).then(function(r){return r.json();}),
-      get('/api/boletim/501/dias?'+q, {dias:[]}),
-      get('/api/boletim/502/dias?'+q, {dias:[]}),
-      get('/api/producao/por-produto?'+q, {produtos:[]}),
-      get('/api/boletim/detalhe?'+q, {dias:[], consumo:{mats:[],dias:[]}}),   // receitas por turno + consumo de MP (Firestore)
+      fetch('/api/boletim/app?'+q).then(function(r){ return r.json(); }),
+      get('/api/boletim/detalhe?'+q, {dias:[], consumo:{mats:[],dias:[]}}),
     ]).then(function(res){
-      var r501 = res[0], r502 = res[1];
-      var dias501 = res[2].dias || [], dias502 = res[3].dias || [];
-      var porProduto = res[4].produtos || [];
-      var det = res[5] || {dias:[], consumo:{mats:[],dias:[]}};
-      var detDias = det.dias || [];
+      var bol = res[0] || {};
+      if (!bol.ok) throw new Error(bol.erro || 'dados do app indisponíveis');
+      var r501 = bol.linhas['501'], r502 = bol.linhas['502'];
+      var diasApp = bol.dias || {};
+      var porProduto = bol.porProduto || [];
+      var det = res[1] || {dias:[], consumo:{mats:[],dias:[]}};
       var cons = det.consumo || {mats:[],dias:[]};
       var N = function(v){ return parseFloat(v)||0; };
       var doc = new jspdf.jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
@@ -628,17 +627,17 @@
       doc.setFontSize(11); doc.setFont(undefined,'normal');
       doc.text((tipo==='diario'?'Boletim Diário':'Boletim Mensal') + ' — ' + periodoLabel, 14, 23);
       doc.setFontSize(9); doc.setTextColor(120);
-      doc.text('Gerado em ' + new Date().toLocaleString('pt-BR') + '  ·  T/h nominal do equipamento: ' + nominal + ' t/h', 14, 28);
+      doc.text('Gerado em ' + new Date().toLocaleString('pt-BR') + '  ·  Fonte: app Cimento Gaúcho (mesmos dados e cálculos)', 14, 28);
       doc.setTextColor(0);
 
       function linhaOEE(r, nomeLinha){
-        var horasRod = r && r.periodo ? r.periodo.horasRodando : null;
+        var horasRod = r ? r.horasRodando : null;
         return [
           nomeLinha,
           fmtN(r.tonTotal,1)+' t',
-          fmtN(r.tonHMedia,2)+' t/h',
-          fmtN(r.kwhTotal,0)+' kWh',
-          fmtN(r.kwht,2)+' kW/t',
+          r.tonHMedia!=null ? fmtN(r.tonHMedia,2)+' t/h' : '—',
+          r.kwhTotal!=null ? fmtN(r.kwhTotal,0)+' kWh' : '—',
+          r.kwht!=null ? fmtN(r.kwht,2)+' kW/t' : '—',
           horasRod!=null ? fmtN(horasRod,1)+'h' : '—',
           r.disponibilidade!=null ? r.disponibilidade+'%' : '—',
           r.performance!=null ? r.performance+'%' : '—',
@@ -664,10 +663,10 @@
       if (tipo === 'diario') {
         cabecalhoQualidade = [['Linha','Turno','Receita','Malha (%)','Blaine (cm²/g)']];
         corpoQualidade = [];
-        [[r501,'501'],[r502,'502']].forEach(function(par){
-          var r = par[0], ln = par[1];
-          var dt = (r.qualidadeDetalhe||[])[0];
-          if (!dt) { corpoQualidade.push([ln,'—','sem lançamento no app Cimento Gaúcho','—','—']); return; }
+        ['501','502'].forEach(function(ln){
+          var d0 = (diasApp[ln]||[])[0];
+          if (!d0 || !(d0.ton > 0)) { corpoQualidade.push([ln,'—','sem produção no dia','—','—']); return; }
+          var dt = d0.r;
           corpoQualidade.push([ln,'Diurno', dt.receitaD||'—', dt.dMalha!=null?fmtN(dt.dMalha,2):'—', dt.dBlaine!=null?Math.round(dt.dBlaine):'—']);
           corpoQualidade.push([ln,'Noturno', dt.receitaN||'—', dt.nMalha!=null?fmtN(dt.nMalha,2):'—', dt.nBlaine!=null?Math.round(dt.nBlaine):'—']);
         });
@@ -710,39 +709,23 @@
       }
 
       // ── Detalhamento por dia — com a RECEITA de cada turno rodado ──
-      // Totais do dia (t, t/h, kWh, min) vêm do CLP (/dias); receita, produção
-      // por turno e malha/Blaine vêm do app (/detalhe). "—" = turno sem produção.
+      // Igual ao app: produção, T/h, kWh e minutos do dia vêm do Firestore
+      // (m1/m2/cpiiz + moinhos). "—" = turno sem produção.
       function par(a, b, d){
         var x = (a!=null) ? fmtN(a,d) : '—', y = (b!=null) ? fmtN(b,d) : '—';
         return (x==='—' && y==='—') ? '—' : x+' / '+y;
       }
-      var chDia = function(dataFull){ return dataFull.split('/').slice(0,2).join('/'); };
-      var temCpiiz = detDias.some(function(d){ return d.cpiiz && (N(d.cpiiz.dProd)+N(d.cpiiz.nProd)) > 0; });
+      var temCpiiz = (diasApp.cpiiz||[]).some(function(d){ return d.ton > 0; });
       var blocos = [
-        { nome:'501', cor:'#3b82f6', dias:dias501, kwh:true },
-        { nome:'502', cor:'#f59e0b', dias:dias502, kwh:true },
+        { nome:'501', cor:'#3b82f6', dias:diasApp['501']||[], kwh:true },
+        { nome:'502', cor:'#f59e0b', dias:diasApp['502']||[], kwh:true },
       ];
-      if (temCpiiz) blocos.push({ nome:'CPII-Z', cor:'#64748b', dias:[], kwh:false });
+      if (temCpiiz) blocos.push({ nome:'CPII-Z', cor:'#64748b', dias:diasApp.cpiiz||[], kwh:false });
 
       blocos.forEach(function(L){
-        var porData = {};
-        (L.dias||[]).forEach(function(d){ porData[chDia(d.data)] = d; });
-        var lista = [];
-        detDias.forEach(function(dd){
-          var key = L.nome==='CPII-Z' ? 'cpiiz' : L.nome;
-          var r = dd[key] || null;
-          var c = porData[dd.data] || null;
-          var tonApp = r ? N(r.dProd)+N(r.nProd) : 0;
-          if (!c && tonApp <= 0) return;                       // sem produção neste dia
-          lista.push({ data: dd.data, r: r || {}, c: c, tonApp: tonApp });
-        });
-        // dias que só existem no /dias (ex.: app sem lançamento ainda)
-        (L.dias||[]).forEach(function(c){
-          var k = chDia(c.data);
-          if (!lista.some(function(x){ return x.data===k; })) lista.push({ data:k, r:{}, c:c, tonApp:0 });
-        });
-        lista.sort(function(a,b){ return a.data.split('/').reverse().join('').localeCompare(b.data.split('/').reverse().join('')); });
-        if (!lista.length) return;
+        var lista = L.dias;
+        if (!lista.some(function(d){ return d.ton > 0; })) return;
+        if (!L.kwh) lista = lista.filter(function(d){ return d.ton > 0; }); // CPII-Z: só dias com produção
 
         doc.addPage();
         doc.setFontSize(13); doc.setFont(undefined,'bold');
@@ -751,23 +734,22 @@
         doc.text('Cada linha é o total daquele dia (diurno + noturno). Receita e produção de cada turno rodado; "—" = turno sem produção.', 14, 22);
         doc.setTextColor(0);
 
-        var corpo = lista.map(function(x){
-          var r = x.r, rodD = N(r.dProd)>0, rodN = N(r.nProd)>0, c = x.c;
-          var totalDia = c ? N(c.tonProduzida) : x.tonApp;
-          return [x.data,
+        var corpo = lista.map(function(d){
+          var r = d.r, rodD = N(r.dProd)>0, rodN = N(r.nProd)>0;
+          return [d.data,
                   rodD ? (r.receitaD||'—') : '—', rodD ? fmtN(N(r.dProd),1) : '—',
                   rodN ? (r.receitaN||'—') : '—', rodN ? fmtN(N(r.nProd),1) : '—',
-                  fmtN(totalDia,1),
-                  c && c.thMedia!=null ? fmtN(c.thMedia,2) : '—',
-                  L.kwh ? (c ? fmtN(c.kwh,0) : '—') : '—',
-                  L.kwh ? (c ? Math.round(c.minRodando) : '—') : '—',
+                  fmtN(d.ton,1),
+                  d.th!=null ? fmtN(d.th,2) : '—',
+                  d.kwh!=null ? fmtN(d.kwh,0) : '—',
+                  d.min!=null ? Math.round(d.min) : '—',
                   par(r.dMalha, r.nMalha, 1), par(r.dBlaine, r.nBlaine, 0)];
         });
-        var tTon = lista.reduce(function(s,x){ return s + (x.c ? N(x.c.tonProduzida) : x.tonApp); },0);
-        var tKwh = lista.reduce(function(s,x){ return s + (x.c ? N(x.c.kwh) : 0); },0);
-        var tMin = lista.reduce(function(s,x){ return s + (x.c ? N(x.c.minRodando) : 0); },0);
-        var tD = lista.reduce(function(s,x){ return s + N(x.r.dProd); },0);
-        var tN = lista.reduce(function(s,x){ return s + N(x.r.nProd); },0);
+        var tTon = lista.reduce(function(s,d){ return s + d.ton; },0);
+        var tKwh = lista.reduce(function(s,d){ return s + (d.kwh||0); },0);
+        var tMin = lista.reduce(function(s,d){ return s + (d.min||0); },0);
+        var tD = lista.reduce(function(s,d){ return s + N(d.r.dProd); },0);
+        var tN = lista.reduce(function(s,d){ return s + N(d.r.nProd); },0);
         corpo.push(['TOTAL','',fmtN(tD,1),'',fmtN(tN,1),fmtN(tTon,1),'—', L.kwh?fmtN(tKwh,0):'—', L.kwh?Math.round(tMin):'—','','']);
 
         tab({
@@ -780,15 +762,15 @@
 
         // gráficos da linha (só mensal, 501/502)
         if (tipo === 'mensal' && L.kwh) {
-          var labels = lista.map(function(x){ return x.data.split('/')[0]; });
+          var labels = lista.map(function(d){ return d.data.split('/')[0]; });
           doc.addPage();
           doc.setFontSize(13); doc.setFont(undefined,'bold');
           doc.text('Gráfico — Linha ' + L.nome, 14, 16);
           doc.setFont(undefined,'normal');
-          var imgP = desenharGraficoBarras(labels, [{ nome:'Produção (t)', cor:L.cor, valores:lista.map(function(x){ return x.c ? N(x.c.tonProduzida) : x.tonApp; }) }], { w:720, h:230, casas:1 });
+          var imgP = desenharGraficoBarras(labels, [{ nome:'Produção (t)', cor:L.cor, valores:lista.map(function(d){ return d.ton; }) }], { w:720, h:230, casas:1 });
           doc.setFontSize(10); doc.text('Produção por dia (t)', 14, 26);
           doc.addImage(imgP, 'PNG', 14, 29, 182, 58);
-          var imgK = desenharGraficoBarras(labels, [{ nome:'Energia (kWh)', cor:'#10b981', valores:lista.map(function(x){ return x.c ? N(x.c.kwh) : 0; }) }], { w:720, h:230, casas:0 });
+          var imgK = desenharGraficoBarras(labels, [{ nome:'Energia (kWh)', cor:'#10b981', valores:lista.map(function(d){ return d.kwh || 0; }) }], { w:720, h:230, casas:0 });
           doc.text('Energia por dia (kWh)', 14, 94);
           doc.addImage(imgK, 'PNG', 14, 97, 182, 58);
         }

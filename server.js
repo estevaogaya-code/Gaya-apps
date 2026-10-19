@@ -939,6 +939,130 @@ app.get('/api/boletim/detalhe', async (req, res) => {
 // Isso existe porque o /api/indicadores, ao integrar sobre db.amostras, dava
 // totais divergentes do "Dados de Produção" pra qualquer período com mais de
 // 7 dias — a maior parte do mês simplesmente não tinha mais amostra nenhuma.
+// ─── Boletim igual ao do app Cimento Gaúcho (fonte única: Firestore) ────────
+// Porta fiel de exportarBoletimPDF()/indicadores() do index.html do app: mesmos
+// números (produção, t/h, kWh, minutos, disponibilidade, performance, qualidade,
+// OEE) a partir de payload.months[].m1/m2/cpiiz/moinhos. Usado pelo PDF do
+// mobile-status para os dois boletins saírem iguais. NÃO usa producao.turnos
+// nem as capturas do CLP. Mantenha em sincronia com o index.html do app.
+function minutosDisponiveisNoDiaApp(dataDia, mes) {
+  const agora = new Date();
+  const hoje = `${String(agora.getDate()).padStart(2,'0')}/${String(agora.getMonth()+1).padStart(2,'0')}`;
+  const mesAtual = mes.year === agora.getFullYear() && (mes.month - 1) === agora.getMonth();
+  if (mesAtual && dataDia === hoje) return agora.getHours() * 60 + agora.getMinutes();
+  return 1440;
+}
+function boletimApp(payload, inicio, fim) {
+  const N = v => parseFloat(v) || 0;
+  const receitas = Array.isArray(payload.receitas) ? payload.receitas : [];
+  const thNominalDe = r => { const rec = receitas.find(x => x.produto === (r.receitaD || r.receita)); return (rec && rec.thNominal) || 0; };
+  const prodDia = r => N(r && r.dProd) + N(r && r.nProd);
+  const temValor = v => v !== null && v !== undefined && v !== '' && !isNaN(parseFloat(v));
+  const LINHAS = [
+    { nome: '501', arr: 'm1', minF: 'minM1', kwhF: 'kwhM1' },
+    { nome: '502', arr: 'm2', minF: 'minM2', kwhF: 'kwhM2' },
+  ];
+
+  // dias do período: [{ mes, i, data }]
+  const dias = [];
+  for (let t = inicio; t < fim; t += 86400000) {
+    const d = new Date(t);
+    const chave = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const data  = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
+    const mes = (payload.months || []).find(m => m.key === chave);
+    if (!mes || !Array.isArray(mes.m1)) continue;
+    const i = mes.m1.findIndex(r => r && r.data === data);
+    if (i >= 0) dias.push({ mes, i, data });
+  }
+
+  function indicadores(L) {
+    let ton = 0, tonTh = 0, horasTh = 0, min = 0, kwh = 0, kwhTem = false;
+    let somaMin = 0, somaMinDisp = 0, somaDesemp = 0, somaScore = 0, diasQual = 0, diasProd = 0;
+    let somaMalha = 0, nMalha = 0, somaBlaine = 0, nBlaine = 0;
+    dias.forEach(({ mes, i }) => {
+      const r = (mes[L.arr] || [])[i]; if (!r) return;
+      const pd = prodDia(r); ton += pd; if (pd > 0) diasProd++;
+      [['dProd','dTh'],['nProd','nTh']].forEach(([p, t]) => { if (N(r[p]) > 0 && N(r[t]) > 0) { tonTh += N(r[p]); horasTh += N(r[p]) / N(r[t]); } });
+      ['dMalha','nMalha'].forEach(k => { if (temValor(r[k])) { somaMalha += parseFloat(r[k]); nMalha++; } });
+      ['dBlaine','nBlaine'].forEach(k => { if (temValor(r[k])) { somaBlaine += parseFloat(r[k]); nBlaine++; } });
+      const m = (mes.moinhos || [])[i] || {};
+      if (m[L.minF] != null) min += N(m[L.minF]);
+      if (m[L.kwhF] != null) { kwh += N(m[L.kwhF]); kwhTem = true; }
+      if (m[L.minF] != null && N(m[L.minF]) > 0) {
+        const minDisp = minutosDisponiveisNoDiaApp(r.data, mes), thNom = thNominalDe(r);
+        const nT = (r.dTh ? 1 : 0) + (r.nTh ? 1 : 0), thReal = (N(r.dTh) + N(r.nTh)) / Math.max(nT, 1);
+        const desemp = thNom > 0 ? Math.min(thReal / thNom, 1) : (thReal > 0 ? 1 : 0);
+        somaMin += N(m[L.minF]); somaMinDisp += minDisp; somaDesemp += desemp * N(m[L.minF]);
+        const q = calcQualidadeRow(r); if (q.temMedicao) { somaScore += q.score; diasQual++; }
+      }
+    });
+    const D = somaMinDisp > 0 ? Math.min(somaMin / somaMinDisp, 1) : null;
+    const P = somaMin > 0 ? somaDesemp / somaMin : null;
+    const Q = diasQual > 0 ? somaScore / diasQual : null;
+    const rd = v => v == null ? null : Math.round(v * 100);
+    return {
+      tonTotal: ton, tonHMedia: horasTh > 0 ? tonTh / horasTh : null, horasRodando: min > 0 ? min / 60 : null,
+      kwhTotal: kwhTem ? kwh : null, kwht: (kwhTem && ton > 0 && kwh > 0) ? kwh / ton : null,
+      disponibilidade: rd(D), performance: rd(P), qualidade: rd(Q),
+      oeeCompleto: (D != null && P != null && Q != null) ? rd(D * P * Q) : null,
+      oee: (D != null && P != null) ? rd(D * P) : null,
+      malhaMedia: nMalha > 0 ? somaMalha / nMalha : null, blaineMedia: nBlaine > 0 ? Math.round(somaBlaine / nBlaine) : null,
+      qualidadeDias: diasQual, qualidadeDiasPeriodo: diasProd,
+    };
+  }
+
+  // detalhamento por dia (mesmo dadosLinha() do app)
+  function diasLinha(arr, minF, kwhF) {
+    return dias.map(({ mes, i, data }) => {
+      const r = (mes[arr] || [])[i] || {}, m = (mes.moinhos || [])[i] || {};
+      let t = 0, h = 0;
+      [['dProd','dTh'],['nProd','nTh']].forEach(([p, q]) => { if (N(r[p]) > 0 && N(r[q]) > 0) { t += N(r[p]); h += N(r[p]) / N(r[q]); } });
+      return {
+        data, ton: prodDia(r), th: h > 0 ? t / h : null,
+        kwh: kwhF ? (m[kwhF] != null ? N(m[kwhF]) : 0) : null,
+        min: minF ? (m[minF] != null ? N(m[minF]) : 0) : null,
+        r: {
+          receitaD: r.receitaD || r.receita || null, receitaN: r.receitaN || r.receita || null,
+          dProd: N(r.dProd), nProd: N(r.nProd),
+          dMalha: temValor(r.dMalha) ? parseFloat(r.dMalha) : null, nMalha: temValor(r.nMalha) ? parseFloat(r.nMalha) : null,
+          dBlaine: temValor(r.dBlaine) ? parseFloat(r.dBlaine) : (temValor(r.blaine) ? parseFloat(r.blaine) : null),
+          nBlaine: temValor(r.nBlaine) ? parseFloat(r.nBlaine) : null,
+        },
+      };
+    });
+  }
+
+  // produção por produto (por receita de cada meio-turno, 501+502+CPII-Z)
+  const acum = {};
+  dias.forEach(({ mes, i }) => ['m1','m2','cpiiz'].forEach(arr => {
+    const r = (mes[arr] || [])[i]; if (!r) return;
+    [['dProd','dTh', r.receitaD || r.receita], ['nProd','nTh', r.receitaN || r.receita]].forEach(([p, t, rec]) => {
+      const ton = N(r[p]); if (ton <= 0) return;
+      const k = classRecQ(rec) || 'sem receita';
+      if (!acum[k]) acum[k] = { ton: 0, tonTh: 0, horas: 0 };
+      acum[k].ton += ton; if (N(r[t]) > 0) { acum[k].tonTh += ton; acum[k].horas += ton / N(r[t]); }
+    });
+  }));
+  const porProduto = Object.entries(acum).sort((a, b) => b[1].ton - a[1].ton)
+    .map(([produto, a]) => ({ produto, tonTotal: a.ton, thMedio: a.horas > 0 ? a.tonTh / a.horas : null }));
+
+  return {
+    ok: true,
+    linhas: { 501: indicadores(LINHAS[0]), 502: indicadores(LINHAS[1]) },
+    dias: { 501: diasLinha('m1', 'minM1', 'kwhM1'), 502: diasLinha('m2', 'minM2', 'kwhM2'), cpiiz: diasLinha('cpiiz', null, null) },
+    porProduto,
+  };
+}
+app.get('/api/boletim/app', async (req, res) => {
+  const agora  = Date.now();
+  const inicio = parseInt(req.query.inicio) || agora - 86400000;
+  const fim    = parseInt(req.query.fim)    || agora;
+  const payload = await getPayloadFirestore();
+  if (!payload || !Array.isArray(payload.months))
+    return res.status(503).json({ ok: false, erro: 'Firestore indisponível — não dá para montar o boletim igual ao app.' });
+  res.json(boletimApp(payload, inicio, fim));
+});
+
 app.get('/api/boletim/:linha', async (req, res) => {
   const ln = req.params.linha;
   if (!['501','502'].includes(ln)) return res.status(400).json({ erro: 'Linha inválida' });

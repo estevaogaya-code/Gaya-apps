@@ -431,7 +431,11 @@ const app    = express();
 const server = http.createServer(app);
 const wss    = new WebSocket.Server({ server });
 app.use(cors()); app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+// .html sempre revalidado (no-cache): sem isso o navegador do celular pode
+// continuar usando a versão antiga da página depois de uma cópia nova.
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, arq) => { if (arq.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache'); },
+}));
 
 // Receitas 501/502 (leitura/escrita via fila drenada no ciclo do CLP) — ver receitas.js
 const receitas = criarReceitas({

@@ -1242,9 +1242,18 @@ async function sincronizarBoletimFirebase() {
     const limiteAntigo = Date.now() - 5 * 86400000; // só turnos dos últimos 5 dias
     const turnosRecentes = producao.turnos.filter(t => t.inicio >= limiteAntigo);
 
+    // Energia/minutos: corte da janela na MEIA-NOITE, para os dois turnos de uma
+    // data entrarem ou saírem juntos. Com o corte "agora − 5 dias" o diurno
+    // (07:00) saía da janela 11 h antes do noturno (18:00) e, nesse intervalo,
+    // a soma do dia virava só o noturno e era gravada por cima do total certo —
+    // e a data congelava assim (ex.: 501 em 01/10: 6.014 kWh em vez de 12.527).
+    const dLim = new Date(limiteAntigo);
+    const limiteDia = new Date(dLim.getFullYear(), dLim.getMonth(), dLim.getDate() + 1).getTime();
+    const turnosEnergia = producao.turnos.filter(t => t.inicio >= limiteDia);
+
     // Agrupa por "chaveMes|dataDia" somando diurno+noturno de cada moinho
     const somaPorDia = {}; // { 'YYYY-MM|DD/MM': { min1,kwh1,min2,kwh2 } }
-    turnosRecentes.forEach(t => {
+    turnosEnergia.forEach(t => {
       const d = new Date(t.inicio);
       const chaveMesT = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
       const dataDia   = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;

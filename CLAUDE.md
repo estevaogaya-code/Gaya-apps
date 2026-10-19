@@ -14,5 +14,5 @@
 - **Dados de produção** (ver `.gitignore`) nunca entram no repositório.
 - **Alterações no `server.js`:** mínimas e cirúrgicas; o processo `pa` não é deste repositório
   e não deve ser tocado. Acesso ao CLP só pela fila de `receitas.js` (sem concorrência no socket).
-- **Validação:** `node --check server.js receitas.js` e `node --test test/` (precisa de
+- **Validação:** `node --check server.js receitas.js` e `node --test test/*.test.js` (precisa de
   `express` instalado).

@@ -319,9 +319,27 @@
 
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script>
+  // jsPDF vem da internet (cdnjs) e só é baixado na hora do PDF: carregado no
+  // <head>/<body> ele travava a tela em branco quando a rede do celular estava
+  // sem internet, mesmo com o servidor respondendo.
+  var jsPDFPromessa = null;
+  function carregarScript(src){
+    return new Promise(function(ok, falha){
+      var s = document.createElement('script');
+      s.src = src; s.onload = ok;
+      s.onerror = function(){ falha(new Error('sem internet para baixar ' + src.split('/').pop())); };
+      document.head.appendChild(s);
+    });
+  }
+  function comJsPDF(fn){
+    if (!jsPDFPromessa) {
+      jsPDFPromessa = carregarScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js')
+        .then(function(){ return carregarScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js'); })
+        .catch(function(e){ jsPDFPromessa = null; throw e; });
+    }
+    jsPDFPromessa.then(fn, function(e){ alert('Não foi possível gerar o PDF: ' + e.message); });
+  }
 (function(){
   'use strict';
 
@@ -986,7 +1004,7 @@
   var bolData = document.getElementById('bol-data');
   if (bolData && !bolData.value) bolData.value = new Date().toISOString().slice(0,10);
   var bolBtn = document.getElementById('bol-btn');
-  if (bolBtn) bolBtn.addEventListener('click', exportarBoletimPDF);
+  if (bolBtn) bolBtn.addEventListener('click', function(){ comJsPDF(exportarBoletimPDF); });
 
   // ── Modal de Histórico (usa dados já recebidos por fetchProducao — sem
   //    nenhuma requisição nova; só ~90 turnos, ~53 KB, já em memória) ────────
@@ -1205,7 +1223,7 @@
     });
   }
   var bolSacosBtn = document.getElementById('bol-sacos-btn');
-  if (bolSacosBtn) bolSacosBtn.addEventListener('click', exportarBoletimEnsacadeiraPDF);
+  if (bolSacosBtn) bolSacosBtn.addEventListener('click', function(){ comJsPDF(exportarBoletimEnsacadeiraPDF); });
   var bolSacosData = document.getElementById('bol-sacos-data');
   if (bolSacosData) bolSacosData.value = new Date().toISOString().slice(0,10);
 

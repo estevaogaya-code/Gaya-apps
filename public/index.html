@@ -1,0 +1,1654 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dashboard Industrial — Cimento Gaúcho</title>
+<script src="/chart.umd.min.js"></script>
+<style>
+:root{--bg:#0d1117;--bg2:#161b22;--bg3:#21262d;--border:#30363d;--text:#e6edf3;--sub:#8b949e;--blue:#58a6ff;--green:#3fb950;--red:#f85149;--yellow:#d29922;--orange:#db6d28;}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',sans-serif;font-size:13px;display:flex;height:100vh;overflow:hidden}
+#sidebar{width:210px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+.logo{padding:14px 14px 10px;font-size:14px;font-weight:700;color:var(--blue);border-bottom:1px solid var(--border);line-height:1.3}
+.logo span{display:block;font-size:10px;font-weight:400;color:var(--sub);margin-top:2px}
+#snav{flex:1;overflow-y:auto;padding:6px 0}
+#snav a{display:flex;align-items:center;gap:9px;padding:8px 14px;color:var(--sub);text-decoration:none;border-left:3px solid transparent;cursor:pointer;font-size:12px}
+#snav a:hover{color:var(--text);background:var(--bg3)}
+#snav a.active{color:var(--blue);border-left-color:var(--blue);background:rgba(88,166,255,.08)}
+#snav a svg{width:15px;height:15px;flex-shrink:0}
+.badge{margin-left:auto;background:var(--red);color:#fff;font-size:10px;font-weight:700;border-radius:10px;padding:1px 6px;display:none}
+#clpbar{padding:10px 14px;border-top:1px solid var(--border);display:flex;align-items:center;gap:7px;font-size:11px;color:var(--sub)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--red);flex-shrink:0}.dot.on{background:var(--green)}
+#main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.topbar{padding:10px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--bg2)}
+.topbar h1{font-size:14px;font-weight:600}.topbar .ts{font-size:11px;color:var(--sub)}
+.content{flex:1;overflow-y:auto;padding:16px}
+.page{display:none}.page.active{display:block}
+@keyframes blink-r{0%,100%{opacity:1}50%{opacity:.55}}
+@keyframes blink-y{0%,100%{background:rgba(210,153,34,.1)}50%{background:rgba(210,153,34,.26)}}
+@keyframes blink-rr{0%,100%{background:rgba(248,81,73,.1)}50%{background:rgba(248,81,73,.28)}}
+.banner{display:none;background:rgba(248,81,73,.1);border:1px solid var(--red);border-radius:7px;padding:9px 14px;margin-bottom:14px;color:var(--red);font-size:12px;font-weight:600;animation:blink-r 1.5s infinite}
+.banner.show{display:block}
+.fbar{margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.fbar input,.fbar select{background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:12px;outline:none}
+.fbar input{width:240px}.fbar input:focus,.fbar select:focus{border-color:var(--blue)}
+.cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px;position:relative;cursor:pointer;transition:border-color .15s}
+.card:hover{border-color:var(--blue)}
+.card.al-hi,.card.al-lo{border-color:var(--yellow);animation:blink-y 1.2s infinite}
+.card.al-hihi{border-color:var(--red);animation:blink-rr .85s infinite}
+.tn{font-size:9px;color:var(--sub);margin-bottom:4px;font-family:monospace;word-break:break-all}
+.lbl{font-size:11px;line-height:1.35;min-height:28px;margin-bottom:8px}
+.vrow{display:flex;align-items:baseline;gap:5px}
+.val{font-size:24px;font-weight:700;font-family:monospace;line-height:1}
+.card.al-hi .val,.card.al-lo .val{color:var(--yellow)}.card.al-hihi .val{color:var(--red)}
+.unt{font-size:11px;color:var(--sub)}
+.bw{margin-top:8px;background:var(--bg3);border-radius:3px;height:4px;overflow:hidden}
+.bbar{height:100%;border-radius:3px;background:var(--blue);transition:width .4s}
+.card.al-hi .bbar,.card.al-lo .bbar{background:var(--yellow)}.card.al-hihi .bbar{background:var(--red)}
+.lrow{display:flex;justify-content:space-between;margin-top:3px;font-size:9px;color:var(--sub)}
+.albadge{position:absolute;top:8px;right:8px;font-size:9px;font-weight:700;padding:2px 6px;border-radius:8px}
+.card.al-hi .albadge,.card.al-lo .albadge{background:var(--yellow);color:#000}.card.al-hihi .albadge{background:var(--red);color:#fff}
+.tsm{font-size:9px;color:var(--sub);margin-top:5px}
+.cond-lbl{font-size:9px;color:var(--orange);margin-top:3px}
+.cfg-btn{position:absolute;bottom:8px;right:8px;background:none;border:1px solid var(--border);color:var(--sub);border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer}
+.cfg-btn:hover{border-color:var(--blue);color:var(--blue)}
+.btn-sm{background:none;border:1px solid var(--border);color:var(--sub);border-radius:4px;padding:2px 6px;font-size:9px;cursor:pointer;flex:1;text-align:center}
+.btn-sm:hover{border-color:var(--blue);color:var(--blue)}
+.card-grp{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px;transition:border-color .15s}
+.card-grp:hover{border-color:var(--blue)}
+.card-grp.al-hi,.card-grp.al-lo{border-color:var(--yellow);animation:blink-y 1.2s infinite}
+.card-grp.al-hihi{border-color:var(--red);animation:blink-rr .85s infinite}
+.grp-hdr{font-size:10px;font-weight:700;color:var(--text);margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid var(--border)}
+.grp-grid{display:grid;gap:5px}
+.grp-grid.c2{grid-template-columns:1fr 1fr}
+.grp-grid.c3{grid-template-columns:1fr 1fr 1fr}
+.grp-grid.c5{grid-template-columns:1fr 1fr 1fr 1fr 1fr}
+.gi{background:var(--bg3);border-radius:5px;padding:6px 7px;min-width:0}
+.gi .gl{font-size:8px;color:var(--sub);margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gi .gv{font-size:16px;font-weight:700;font-family:monospace;line-height:1.1}
+.gi .gu{font-size:8px;color:var(--sub)}
+.gi .gb{margin-top:3px;background:var(--bg);border-radius:2px;height:3px;overflow:hidden}
+.gi .gf{height:100%;border-radius:2px;background:var(--blue)}
+.gi.al-hi .gv,.gi.al-lo .gv{color:var(--yellow)}
+.gi.al-hi .gf,.gi.al-lo .gf{background:var(--yellow)}
+.gi.al-hihi .gv{color:var(--red)}
+.gi.al-hihi .gf{background:var(--red)}
+.grp-foot{display:flex;gap:4px;margin-top:6px;flex-wrap:wrap}
+/* Card de grupo multi-variável */
+.card-group{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px;position:relative;transition:border-color .15s}
+.card-group:hover{border-color:var(--blue)}
+.card-group.al-hi,.card-group.al-lo{border-color:var(--yellow);animation:blink-y 1.2s infinite}
+.card-group.al-hihi{border-color:var(--red);animation:blink-rr .85s infinite}
+.grp-title{font-size:10px;font-weight:700;color:var(--text);margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid var(--border)}
+.grp-items{display:grid;gap:6px}
+.grp-items.cols-2{grid-template-columns:1fr 1fr}
+.grp-items.cols-3{grid-template-columns:1fr 1fr 1fr}
+.grp-item{background:var(--bg3);border-radius:5px;padding:6px 8px}
+.grp-item .gi-lbl{font-size:8px;color:var(--sub);margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.grp-item .gi-val{font-size:17px;font-weight:700;font-family:monospace;line-height:1}
+.grp-item .gi-unit{font-size:9px;color:var(--sub)}
+.grp-item .gi-bar{margin-top:4px;background:var(--bg);border-radius:2px;height:3px;overflow:hidden}
+.grp-item .gi-fill{height:100%;border-radius:2px;background:var(--blue)}
+.grp-item.al-hi .gi-val,.grp-item.al-lo .gi-val{color:var(--yellow)}
+.grp-item.al-hi .gi-fill,.grp-item.al-lo .gi-fill{background:var(--yellow)}
+.grp-item.al-hihi .gi-val{color:var(--red)}
+.grp-item.al-hihi .gi-fill{background:var(--red)}
+.grp-btns{display:flex;gap:4px;margin-top:6px}
+/* Card duplo corrente+velocidade */
+.card-pair{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px;position:relative;cursor:pointer;transition:border-color .15s}
+.card-pair:hover{border-color:var(--blue)}
+.card-pair.al-hi,.card-pair.al-lo{border-color:var(--yellow);animation:blink-y 1.2s infinite}
+.card-pair.al-hihi{border-color:var(--red);animation:blink-rr .85s infinite}
+.pair-title{font-size:10px;font-weight:700;color:var(--text);margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid var(--border)}
+.pair-row{display:flex;gap:8px;align-items:stretch}
+.pair-half{flex:1;background:var(--bg3);border-radius:5px;padding:7px 8px;min-width:0}
+.pair-half .ph-lbl{font-size:8px;color:var(--sub);margin-bottom:2px}
+.pair-half .ph-val{font-size:18px;font-weight:700;font-family:monospace;line-height:1}
+.pair-half .ph-unit{font-size:9px;color:var(--sub)}
+.pair-half .ph-bar{margin-top:5px;background:var(--bg);border-radius:2px;height:3px;overflow:hidden}
+.pair-half .ph-fill{height:100%;border-radius:2px;background:var(--blue)}
+.pair-half.al-hi .ph-val,.pair-half.al-lo .ph-val{color:var(--yellow)}
+.pair-half.al-hi .ph-fill,.pair-half.al-lo .ph-fill{background:var(--yellow)}
+.pair-half.al-hihi .ph-val{color:var(--red)}
+.pair-half.al-hihi .ph-fill{background:var(--red)}
+.btn{background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer}
+.btn:hover{border-color:var(--blue);color:var(--blue)}
+.btn.pri{background:var(--blue);border-color:var(--blue);color:#000;font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{background:var(--bg3);padding:8px 10px;text-align:left;font-weight:600;color:var(--sub);border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:hover td{background:var(--bg3)}
+.tp{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px}
+.tp-hi{background:rgba(210,153,34,.2);color:var(--yellow)}.tp-hihi{background:rgba(248,81,73,.2);color:var(--red)}.tp-lo{background:rgba(219,109,40,.2);color:var(--orange)}
+.s-ativo{color:var(--red);font-weight:600}.s-ok{color:var(--green)}
+.btn-ack{background:none;border:1px solid var(--sub);color:var(--sub);border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer}
+.btn-ack:hover{border-color:var(--green);color:var(--green)}.ack-ok{color:var(--green);font-size:10px}
+#ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:200;align-items:center;justify-content:center}
+#ov.open{display:flex}
+.modal{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:22px;width:340px;max-width:96vw}
+.modal h2{font-size:14px;margin-bottom:3px}.msub{font-size:11px;color:var(--sub);margin-bottom:16px;word-break:break-all;white-space:pre-line}
+.fr{margin-bottom:12px}.fr label{display:block;font-size:11px;color:var(--sub);margin-bottom:4px}
+.fr input{width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:6px;font-size:13px;outline:none}
+.fr input:focus{border-color:var(--blue)}.mbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+#gov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:300;align-items:center;justify-content:center}
+#gov.open{display:flex}
+#ovEditProd{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:200;align-items:center;justify-content:center}
+#ovEditProd.open{display:flex}
+.gmodal{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px;width:min(850px,97vw);max-height:96vh;display:flex;flex-direction:column;gap:12px}
+.gmodal h2{font-size:14px;font-weight:600}
+.gtb{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.gtb select,.gtb input{background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:5px 9px;border-radius:5px;font-size:12px;outline:none}
+.gwrap{flex:1;min-height:300px;max-height:440px;position:relative;background:var(--bg3);border-radius:8px;padding:12px}
+.gstat{display:flex;gap:14px;font-size:11px;color:var(--sub);flex-wrap:wrap}
+.gstat span b{color:var(--text)}
+::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+/* Status digital nos cards */
+.eq-badge{display:inline-flex;align-items:center;gap:4px;font-size:9px;font-weight:700;padding:2px 6px;border-radius:6px;margin-top:4px;margin-right:3px}
+.eq-on{background:rgba(248,81,73,.18);color:#f85149;border:1px solid rgba(248,81,73,.4)}
+.eq-off{background:rgba(63,185,80,.18);color:#3fb950;border:1px solid rgba(63,185,80,.4)}
+.eq-fault{background:rgba(210,153,34,.18);color:#d29922;border:1px solid rgba(210,153,34,.4)}
+.eq-flow{background:rgba(88,166,255,.18);color:#58a6ff;border:1px solid rgba(88,166,255,.4)}
+.sin-wrap{width:100%;height:100%;overflow:auto;background:#0a0f16}
+.sin-tabs{display:flex;gap:0;border-bottom:1px solid var(--border);background:var(--bg2);padding:0 16px}
+.sin-tab{padding:9px 18px;font-size:12px;color:var(--sub);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
+.sin-tab.active{color:var(--blue);border-bottom-color:var(--blue)}
+.sin-svg-wrap{padding:16px;overflow:auto}
+/* Indicadores */
+.ind-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.ind-bar select,.ind-bar input{background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:5px 9px;border-radius:6px;font-size:12px;outline:none}
+.ind-bar select:focus,.ind-bar input:focus{border-color:var(--blue)}
+.ind-compare{display:grid;grid-template-columns:1fr 1px 1fr;gap:0;margin-bottom:16px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.ind-col{padding:18px}
+.ind-divider{background:var(--border)}
+.ind-titulo{font-size:13px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.ind-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;display:inline-block}
+.ind-kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.kpi{background:var(--bg3);border-radius:8px;padding:12px}
+.kpi .kpi-lbl{font-size:10px;color:var(--sub);margin-bottom:4px}
+.kpi .kpi-val{font-size:22px;font-weight:700;font-family:monospace;line-height:1}
+.kpi .kpi-unit{font-size:10px;color:var(--sub);margin-top:2px}
+.kpi.kpi-ok .kpi-val{color:var(--green)}
+.kpi.kpi-warn .kpi-val{color:var(--yellow)}
+.kpi.kpi-bad .kpi-val{color:var(--red)}
+.oee-bar{margin-top:6px;background:var(--bg);border-radius:3px;height:5px;overflow:hidden}
+.oee-fill{height:100%;border-radius:3px;transition:width .5s}
+.ind-charts{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:12px}
+.ind-chart-box{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px}
+.ind-chart-wrap{position:relative;height:180px;width:100%}
+.ind-chart-title{font-size:11px;font-weight:600;color:var(--sub);margin-bottom:10px}
+.mggrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px}
+.mgcard{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:11px;cursor:pointer;transition:border-color .15s}
+.mgcard:hover{border-color:var(--blue)}
+.mgcard.al-hi,.mgcard.al-lo{border-color:var(--yellow);animation:blink-y 1.2s infinite}
+.mgcard.al-hihi{border-color:var(--red);animation:blink-rr .85s infinite}
+.mgcard .mgh{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px;gap:6px}
+.mgcard .mglbl{font-size:10px;line-height:1.35;flex:1;color:var(--text)}
+.mgcard .mgval{font-size:16px;font-weight:700;font-family:monospace;white-space:nowrap;text-align:right}
+.mgcard.al-hi .mgval,.mgcard.al-lo .mgval{color:var(--yellow)}
+.mgcard.al-hihi .mgval{color:var(--red)}
+.mgcard .mgunt{font-size:9px;color:var(--sub);text-align:right}
+.mgcard canvas{width:100%!important;height:70px!important;display:block}
+.mgcard .mgfooter{display:flex;justify-content:space-between;margin-top:4px;font-size:9px;color:var(--sub)}
+</style>
+</head>
+<body>
+<div id="sidebar">
+  <div class="logo">Cimento Gaúcho<span>Moagens 501 · 502</span></div>
+  <div id="snav">
+    <a class="active" onclick="goPage('variaveis',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Variáveis
+    </a>
+    <a onclick="goPage('indicadores',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>Indicadores
+    </a>
+    <a onclick="goPage('producao',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="6" height="18" rx="1"/><rect x="9" y="8" width="6" height="13" rx="1"/><rect x="16" y="13" width="6" height="8" rx="1"/></svg>Dados de Produção
+    </a>
+    <a onclick="goPage('log',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>Log de Alarmes
+      <span class="badge" id="badge">0</span>
+    </a>
+  </div>
+  <div id="clpbar"><div class="dot" id="dot"></div><span id="clptxt">Conectando...</span></div>
+</div>
+<div id="main">
+  <div class="topbar"><h1 id="ptitle">Variáveis do Processo</h1><span class="ts" id="ts"></span></div>
+  <div class="content">
+    <div class="banner" id="banner"></div>
+    <div id="page-variaveis" class="page active">
+      <div class="fbar">
+        <input id="fbusca" placeholder="🔍  Buscar variável ou tag..." oninput="filtrar()">
+        <select id="farea" onchange="filtrar()">
+          <option value="">Todas as áreas</option>
+          <option value="__501__">Área 501</option>
+          <option value="__502__">Área 502</option>
+          <option value="__al__">⚠ Em alarme</option>
+        </select>
+      </div>
+      <div class="cgrid" id="grid"></div>
+    </div>
+    <div id="page-indicadores" class="page">
+      <div class="ind-bar">
+        <select id="ind-per" onchange="carregarIndicadores()">
+          <option value="8">Último turno (8h)</option>
+          <option value="24" selected>Último dia (24h)</option>
+          <option value="72">Últimos 3 dias</option>
+          <option value="168">Últimos 7 dias</option>
+        </select>
+        <label style="font-size:11px;color:var(--sub);display:flex;align-items:center;gap:6px">
+          Produção nominal:
+          <input type="number" id="ind-nominal" value="30" min="1" max="200" step="0.5" style="width:70px"> t/h
+        </label>
+        <button class="btn" onclick="carregarIndicadores()">↺ Atualizar</button>
+        <span style="margin-left:auto;font-size:11px;color:var(--sub)" id="ind-ts"></span>
+      </div>
+
+      <!-- Comparativo 501 vs 502 -->
+      <div class="ind-compare">
+        <div class="ind-col" id="ind-501">
+          <div class="ind-titulo"><span class="ind-dot" style="background:#58a6ff"></span>Moinho 501BM140</div>
+          <div class="ind-kpis" id="kpis-501"></div>
+        </div>
+        <div class="ind-divider"></div>
+        <div class="ind-col" id="ind-502">
+          <div class="ind-titulo"><span class="ind-dot" style="background:#3fb950"></span>Moinho 502BM140</div>
+          <div class="ind-kpis" id="kpis-502"></div>
+        </div>
+      </div>
+
+      <!-- Gráficos comparativos -->
+      <div class="ind-charts">
+        <div class="ind-chart-box">
+          <div class="ind-chart-title">Ton/h — 501 vs 502</div>
+          <div class="ind-chart-wrap"><canvas id="ch-tonh"></canvas></div>
+        </div>
+        <div class="ind-chart-box">
+          <div class="ind-chart-title">Potência kW — 501 vs 502</div>
+          <div class="ind-chart-wrap"><canvas id="ch-pot"></canvas></div>
+        </div>
+        <div class="ind-chart-box">
+          <div class="ind-chart-title">kW/t (motor+aux) — 501 vs 502</div>
+          <div class="ind-chart-wrap"><canvas id="ch-kwht"></canvas></div>
+        </div>
+        <div class="ind-chart-box">
+          <div class="ind-chart-title">kWh acumulado por hora — 501 vs 502</div>
+          <div class="ind-chart-wrap"><canvas id="ch-kwh"></canvas></div>
+        </div>
+      </div>
+    </div>
+    <div id="page-producao" class="page">
+      <!-- Barra de controles -->
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+        <span style="font-weight:700;font-size:14px">Dados de Produção</span>
+        <select id="prod-mes" onchange="carregarProducao()" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:5px 10px;border-radius:6px;font-size:12px;outline:none"></select>
+        <button class="btn" onclick="carregarProducao()">↺ Atualizar</button>
+        <button class="btn" onclick="exportarProducaoPDF()">⬇ Exportar PDF</button>
+        <span style="width:1px;height:20px;background:var(--border);margin:0 2px"></span>
+        <select id="bol-tipo" onchange="onBolTipoChange()" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:5px 10px;border-radius:6px;font-size:12px;outline:none">
+          <option value="mensal">Boletim Mensal</option>
+          <option value="diario">Boletim Diário</option>
+        </select>
+        <input type="date" id="bol-data" style="display:none;background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;outline:none">
+        <button class="btn" onclick="exportarBoletimPDF()">📋 Boletim (OEE) PDF</button>
+        <span id="prod-ts" style="margin-left:auto;font-size:11px;color:var(--sub)"></span>
+      </div>
+
+      <!-- Cards turno corrente -->
+      <div id="prod-corrente" style="margin-bottom:16px"></div>
+
+      <!-- Gráficos mensais -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+        <div class="ind-chart-box">
+          <div class="ind-chart-title">Produção Diária — 501 vs 502 (t)</div>
+          <div class="ind-chart-wrap"><canvas id="ch-prod-ton"></canvas></div>
+        </div>
+        <div class="ind-chart-box">
+          <div class="ind-chart-title">kW/t (motor+aux) — 501 vs 502</div>
+          <div class="ind-chart-wrap"><canvas id="ch-prod-kwht"></canvas></div>
+        </div>
+        <div class="ind-chart-box">
+          <div class="ind-chart-title">Energia Consumida kWh — 501 vs 502</div>
+          <div class="ind-chart-wrap"><canvas id="ch-prod-kwh"></canvas></div>
+        </div>
+        <div class="ind-chart-box">
+          <div class="ind-chart-title">Média t/h por Turno — 501 vs 502</div>
+          <div class="ind-chart-wrap"><canvas id="ch-prod-th"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Tabela de turnos -->
+      <div style="font-weight:600;font-size:13px;margin-bottom:8px" id="prod-tab-title">Turnos do Mês</div>
+      <div style="overflow-x:auto">
+        <table id="prod-tabela">
+          <thead><tr>
+            <th>Data</th><th>Turno</th>
+            <th>501 t/h</th><th>501 ton</th><th>501 kWh</th><th>501 kW/t</th><th>501 min</th>
+            <th>502 t/h</th><th>502 ton</th><th>502 kWh</th><th>502 kW/t</th><th>502 min</th>
+            <th>Total ton</th><th>Total kW/t</th><th>Ações</th>
+          </tr></thead>
+          <tbody id="prod-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="page-log" class="page">
+      <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+        <span style="font-weight:600;font-size:14px">Log de Alarmes</span>
+        <button class="btn" onclick="expAl()">⬇ Exportar CSV</button>
+        <span style="margin-left:auto;font-size:11px;color:var(--sub)" id="logcnt"></span>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Entrada</th><th>Tag</th><th>Descrição</th><th>Tipo</th><th>Valor</th><th>Limite</th><th>Condição</th><th>Retorno</th><th>Situação</th><th>Ack</th></tr></thead>
+          <tbody id="log-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Modal Limites -->
+<div id="ov" onclick="if(event.target===this)fechaL()">
+  <div class="modal">
+    <h2>⚙ Limites de Alarme</h2>
+    <div class="msub" id="msub"></div>
+    <div class="fr"><label>HI-HI — Crítico (pisca vermelho)</label><input type="number" id="i-hihi" step="any" placeholder="Vazio = desativado"></div>
+    <div class="fr"><label>HI — Alto (pisca amarelo)</label><input type="number" id="i-hi" step="any" placeholder="Vazio = desativado"></div>
+    <div class="fr"><label>LO — Baixo (pisca amarelo)</label><input type="number" id="i-lo" step="any" placeholder="Vazio = desativado"></div>
+    <div class="mbtns"><button class="btn" onclick="fechaL()">Cancelar</button><button class="btn pri" onclick="salvaL()">Salvar</button></div>
+  </div>
+</div>
+
+<!-- Modal Editar Turno (corrige dados de produção de um turno específico) -->
+<div id="ovEditProd" onclick="if(event.target===this)fecharEditProd()">
+  <div class="modal">
+    <h2>✏️ Corrigir Dados do Turno</h2>
+    <div class="msub" id="editProdSub"></div>
+    <div class="fr"><label>Linha</label>
+      <select id="editProdLinha" onchange="preencherCamposEditProd(this.value)" style="width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 8px;font-size:12px">
+        <option value="501">Moinho 501</option>
+        <option value="502">Moinho 502</option>
+        <option value="total">Total (501+502)</option>
+      </select>
+    </div>
+    <div class="fr"><label>Produção (ton)</label><input type="number" id="editProdTon" step="any" placeholder="Vazio = não altera"></div>
+    <div class="fr" id="editProdMinWrap"><label>Minutos Rodando</label><input type="number" id="editProdMin" step="any" placeholder="Vazio = não altera"></div>
+    <div class="fr"><label>Energia (kWh)</label><input type="number" id="editProdKwh" step="any" placeholder="Vazio = não altera"></div>
+    <div class="fr"><label>kW/t</label><input type="number" id="editProdKwht" step="any" placeholder="Vazio = não altera"></div>
+    <div class="msub" style="margin-top:2px;margin-bottom:0">Deixe um campo em branco pra não mexer nele.</div>
+    <div class="mbtns"><button class="btn" onclick="fecharEditProd()">Cancelar</button><button class="btn pri" onclick="salvarEditProd()">Salvar</button></div>
+  </div>
+</div>
+
+<!-- Modal Gráfico -->
+<div id="gov" onclick="if(event.target===this)fechaG()">
+  <div class="gmodal">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
+      <div><h2 id="g-tit">Gráfico</h2><div style="font-size:10px;color:var(--sub);font-family:monospace;margin-top:2px" id="g-tn"></div></div>
+      <button class="btn" onclick="fechaG()" style="flex-shrink:0">✕ Fechar</button>
+    </div>
+    <div class="gtb">
+      <select id="g-per" onchange="onPerChange()">
+        <option value="0.5h">Últimos 30 min</option>
+        <option value="2h">Últimas 2h</option>
+        <option value="12h">Últimas 12h</option>
+        <option value="1d" selected>Último dia</option>
+        <option value="2d">Últimos 2 dias</option>
+        <option value="3d">Últimos 3 dias</option>
+        <option value="7d">Últimos 7 dias</option>
+        <option value="custom">Personalizado</option>
+      </select>
+      <div id="g-cust" style="display:none;gap:6px;align-items:center">
+        <input type="datetime-local" id="g-ini">
+        <span style="color:var(--sub);font-size:11px">até</span>
+        <input type="datetime-local" id="g-fim">
+        <button class="btn" onclick="carregaG()">Buscar</button>
+      </div>
+      <button class="btn" onclick="expG()" style="margin-left:auto">⬇ CSV</button>
+    </div>
+    <div class="gwrap"><canvas id="gcanvas"></canvas></div>
+    <div class="gstat" id="gstat">Carregando...</div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script>
+let tCfg={}, dados={}, alarms=[], limId=null, grafId=null, gChart=null;
+let digital={}; // { id: {ligado,trip,sobrecarga,fluxo,emergencia,alarme_geral,label,area,ts} }
+let digitalCfg={}; // { id: {label,area,tagName} }
+
+let ws;
+let wsUltimoMsg = 0;
+let wsHeartbeat = null;
+
+function conectar(){
+  // Cancelar heartbeat anterior se existir
+  if(wsHeartbeat){ clearInterval(wsHeartbeat); wsHeartbeat=null; }
+
+  ws=new WebSocket('ws://'+location.host);
+  ws.onopen=()=>{
+    setOn(true);
+    wsUltimoMsg = Date.now();
+    // Heartbeat: se nao receber mensagem em 12s, reconecta
+    wsHeartbeat = setInterval(()=>{
+      if(Date.now() - wsUltimoMsg > 12000){
+        console.warn('[WS] Sem mensagem por 12s — reconectando...');
+        clearInterval(wsHeartbeat); wsHeartbeat=null;
+        try{ ws.close(); }catch(e){}
+        setOn(false);
+        setTimeout(conectar, 1000);
+      }
+    }, 5000);
+  };
+  ws.onclose=()=>{
+    if(wsHeartbeat){ clearInterval(wsHeartbeat); wsHeartbeat=null; }
+    setOn(false);
+    setTimeout(conectar,3000);
+  };
+  ws.onerror=()=>ws.close();
+  ws.onmessage=e=>{
+    wsUltimoMsg = Date.now();
+    const m=JSON.parse(e.data);
+    if(m.tipo==='snapshot'){
+      m.tags.forEach(t=>{tCfg[t.id]=t});
+      Object.entries(m.dados).forEach(([id,d])=>{dados[id]=d});
+      renderGrid(); alarms=m.alarmes||[]; renderLog();
+      // Atualizar badges de status nos cards após snapshot
+    } else if(m.tipo==='atualizacao'){
+      dados[m.tagId]={valor:m.valor,qualidade:m.qualidade,ts:m.ts,alarme:m.alarme};
+      updCard(m.tagId); updBanner();
+    } else if(m.tipo==='digital'){
+      digital[m.id]={...digital[m.id],...m};
+    } else if(m.tipo==='snapshot_digital'){
+      m.tags.forEach(t=>{digitalCfg[t.id]=t;});
+      Object.entries(m.dados).forEach(([id,d])=>{digital[id]=d;});
+    } else if(m.tipo==='status'){
+      setOn(m.online);
+    } else if(m.tipo==='log_alarmes'){
+      alarms=m.alarmes; renderLog();
+    } else if(m.tipo==='alarme_entrada'){
+      alarms.unshift(m.alarme); renderLog(); updBanner();
+    } else if(m.tipo==='alarme_retorno'){
+      const a=alarms.find(x=>x.id===m.alarmeId); if(a){a.retorno=m.ts;renderLog();updBanner();}
+    } else if(m.tipo==='alarme_ack'){
+      const a=alarms.find(x=>x.id===m.alarmeId); if(a){a.ack=true;a.ackUser=m.ackUser;a.ackTs=m.ackTs;renderLog();}
+    } else if(m.tipo==='limites_atualizados'){
+      if(tCfg[m.tagId]){Object.assign(tCfg[m.tagId],m.limites);updCard(m.tagId);}
+    }
+  };
+}
+function setOn(on){
+  document.getElementById('dot').className='dot'+(on?' on':'');
+  document.getElementById('clptxt').textContent=on?'CLP Online':'CLP Offline';
+}
+setInterval(()=>{document.getElementById('ts').textContent=new Date().toLocaleString('pt-BR');},1000);
+
+const TITULOS={variaveis:'Variáveis do Processo',indicadores:'Indicadores de Processo',producao:'Dados de Produção',log:'Log de Alarmes'};
+// goPage definido no bloco do sinótico abaixo
+
+// ── Pares corrente+velocidade ─────────────────────────────────────────────────
+// ── Pares corrente+velocidade (2 vars) ────────────────────────────────────
+const PARES = {
+  'ea_rede_501bc035_c':'ea_rede_501bc035_v',
+  'ea_rede_501be060_c':'ea_rede_501be060_v',
+  'ea_rede_501be090_c':'ea_rede_501be090_v',
+  'ea_rede_501fn042_c':'ea_rede_501fn042_v',
+  'ea_rede_501wf005_c':'ea_rede_501wf005_v',
+  'ea_rede_501wf010_c':'ea_rede_501wf010_v',
+  'ea_rede_502bc035_c':'ea_rede_502bc035_v',
+  'ea_rede_502be060_c':'ea_rede_502be060_v',
+  'ea_rede_502be090_c':'ea_rede_502be090_v',
+  'ea_rede_502fn042_c':'ea_rede_502fn042_v',
+  'ea_rede_502wf005_c':'ea_rede_502wf005_v',
+  'ea_rede_502wf010_c':'ea_rede_502wf010_v',
+};
+const PARES_SKIP = new Set(Object.values(PARES));
+
+// ── Grupos multi-variável ──────────────────────────────────────────────────
+// Cada grupo renderiza um card único com N painéis
+const GRUPOS = [
+  // ── Área 501 ──────────────────────────────────────────────────────────────
+  { id:'grp_501motor', title:'MOTOR 501BM140', cols:2,
+    items:[
+      { id:'ea_501bm140_it_u01', lbl:'Corrente' },
+      { id:'ea_501bm140_jt_u01', lbl:'Potência'  },
+    ]},
+  { id:'grp_501sep', title:'SEPARADOR 501MD070', cols:3,
+    items:[
+      { id:'ea_501md070_it_u01', lbl:'Corrente'   },
+      { id:'ea_501md070_st_u01', lbl:'Velocidade' },
+      { id:'ea_501md070_tt_u01', lbl:'Rolam. Inf' },
+      { id:'ea_501md070_tt_u02', lbl:'Rolam. Sup' },
+      { id:'ea_501md070_tt_u03', lbl:'Redutor'    },
+    ]},
+  { id:'grp_501tmot', title:'TEMPS. MOTOR 501BM140', cols:3,
+    items:[
+      { id:'ea_501bm140_tt_u01', lbl:'Est. Fase A' },
+      { id:'ea_501bm140_tt_u02', lbl:'Est. Fase B' },
+      { id:'ea_501bm140_tt_u03', lbl:'Est. Fase C' },
+      { id:'ea_501bm140_tt_u04', lbl:'Mcl Mtr LA'  },
+      { id:'ea_501bm140_tt_u05', lbl:'Mcl Mtr LOA' },
+    ]},
+  { id:'grp_501tmnh', title:'MANCAIS MOINHO 501BM140', cols:2,
+    items:[
+      { id:'ea_501bm140_tt_u06', lbl:'Mancal Mnh LA'  },
+      { id:'ea_501bm140_tt_u07', lbl:'Mancal Mnh LOA' },
+    ]},
+  { id:'grp_501trafo', title:'TRAFO 501TR001', cols:3,
+    items:[
+      { id:'ea_501tr001_tt_u01', lbl:'Fase A' },
+      { id:'ea_501tr001_tt_u02', lbl:'Fase B' },
+      { id:'ea_501tr001_tt_u03', lbl:'Fase C' },
+    ]},
+  // Gases moinho+filtro 501 unificados
+  { id:'grp_501gases', title:'GASES 501BM140 / 501BF040', cols:2,
+    items:[
+      { id:'ea_501bm140_tt_u09', lbl:'Saída Moinho' },
+      { id:'ea_501bf040_tt_u01', lbl:'Entrada Filtro' },
+    ]},
+  // ── Área 502 ──────────────────────────────────────────────────────────────
+  // ── TEMPERATURAS ROLAMENTOS REDUTOR 501 ────────────────────────────────────
+  { id:'grp_501redutor', title:'TEMPS. ROLAMENTOS REDUTOR 501BM140', cols:2,
+    items:[
+      { id:'ea_501bm140_rd_ttu01', lbl:'Eixo Entrada L.A.'  },
+      { id:'ea_501bm140_rd_ttu02', lbl:'Eixo Entrada L.O.A.' },
+      { id:'ea_501bm140_rd_ttu03', lbl:'Eixo Saída L.A.'    },
+      { id:'ea_501bm140_rd_ttu04', lbl:'Eixo Saída L.O.A.'  },
+    ]},
+
+  { id:'grp_502motor', title:'MOTOR 502BM140', cols:2,
+    items:[
+      { id:'ea_502bm140_it_u01', lbl:'Corrente' },
+      { id:'ea_502bm140_jt_u01', lbl:'Potência'  },
+    ]},
+  { id:'grp_502sep', title:'SEPARADOR 502MD070', cols:3,
+    items:[
+      { id:'ea_502md070_it_u01', lbl:'Corrente'   },
+      { id:'ea_502md070_st_u01', lbl:'Velocidade' },
+      { id:'ea_502md070_tt_u01', lbl:'Rolam. Inf' },
+      { id:'ea_502md070_tt_u02', lbl:'Rolam. Sup' },
+      { id:'ea_502md070_tt_u03', lbl:'Redutor'    },
+    ]},
+  { id:'grp_502tmot', title:'TEMPS. MOTOR 502BM140', cols:3,
+    items:[
+      { id:'ea_502bm140_tt_u01', lbl:'Est. Fase A' },
+      { id:'ea_502bm140_tt_u02', lbl:'Est. Fase B' },
+      { id:'ea_502bm140_tt_u03', lbl:'Est. Fase C' },
+      { id:'ea_502bm140_tt_u04', lbl:'Mcl Mtr LA'  },
+      { id:'ea_502bm140_tt_u05', lbl:'Mcl Mtr LOA' },
+    ]},
+  { id:'grp_502tmnh', title:'MANCAIS MOINHO 502BM140', cols:2,
+    items:[
+      { id:'ea_502bm140_tt_u06', lbl:'Mancal Mnh LA'  },
+      { id:'ea_502bm140_tt_u07', lbl:'Mancal Mnh LOA' },
+    ]},
+  // Gases moinho+filtro 502 unificados
+  { id:'grp_502gases', title:'GASES 502BM140 / 502BF040', cols:2,
+    items:[
+      { id:'ea_502bm140_tt_u09', lbl:'Saída Moinho'   },
+      { id:'ea_502bf040_tt_u01', lbl:'Entrada Filtro' },
+    ]},
+
+  // ── TEMPERATURAS ROLAMENTOS REDUTOR 502 ────────────────────────────────────
+  { id:'grp_502redutor', title:'TEMPS. ROLAMENTOS REDUTOR 502BM140', cols:2,
+    items:[
+      { id:'ea_502bm140_rd_ttu01', lbl:'Eixo Entrada L.A.'   },
+      { id:'ea_502bm140_rd_ttu02', lbl:'Eixo Entrada L.O.A.' },
+      { id:'ea_502bm140_rd_ttu03', lbl:'Eixo Saída L.A.'     },
+      { id:'ea_502bm140_rd_ttu04', lbl:'Eixo Saída L.O.A.'   },
+    ]},
+];
+
+// IDs que aparecem em algum grupo (não renderizar card individual)
+const GRUPOS_SKIP = new Set(GRUPOS.flatMap(g=>g.items.map(i=>i.id)));
+
+// IDs a ocultar completamente do dashboard
+const IDS_OCULTAR = new Set([
+  'ea_501bm140_pt_u02','ea_502bm140_pt_u02',   // pressão saída moinho
+  'ea_501bm140_tt_u08','ea_502bm140_tt_u08',   // temp. gases ENTRADA moinho (removido)
+  'ea_501bm140_tt_u09','ea_502bm140_tt_u09',   // gases saída (agora no grp_gases)
+  'ea_501bf040_tt_u01','ea_502bf040_tt_u01',   // gases entrada filtro (agora no grp_gases)
+  'ea_501tr001_tt_u01','ea_501tr001_tt_u02','ea_501tr001_tt_u03', // trafo 501 no grupo
+  // trafo 502 não existe — tt_u01/02/03 502 não declarados individualmente
+  'ea_rede_501sc041_c','ea_rede_501sc041_v',   // SC041 já no grupo separador
+  'ea_rede_502sc041_c','ea_rede_502sc041_v',
+]);
+
+// ── Render card de grupo ─────────────────────────────────────────────────────
+function grupoHTML(grp){
+  const eqB = typeof eqBadgeHTML!=='undefined' ? eqBadgeHTML(grp.items[0].id) : '';
+  const ts = dados[grp.items[0].id]?.ts ? new Date(dados[grp.items[0].id].ts).toLocaleTimeString('pt-BR') : '—';
+  const cols = grp.cols||2;
+  const colsClass = cols>=5?'c5':cols===3?'c3':'c2';
+
+  const cells = grp.items.map(item=>{
+    const cfg=tCfg[item.id]; const d=dados[item.id]||{};
+    if(!cfg) return '';
+    const v=d.valor??null;
+    const vs=v!==null?Number(v).toLocaleString('pt-BR',{maximumFractionDigits:1}):'---';
+    const al=d.alarme||'normal';
+    const pct=v!==null?Math.min(100,Math.max(0,((v-cfg.min)/(cfg.max-cfg.min))*100)):0;
+    const lim=cfg.alarme_hi!=null?`HI:${cfg.alarme_hi}`:cfg.alarme_lo!=null?`LO:${cfg.alarme_lo}`:'';
+    return `<div class="gi ${al!=='normal'?'al-'+al:''}">
+      <div class="gl">${x(item.lbl||cfg.label)}${lim?' <span style="color:var(--yellow);font-size:7px">'+lim+'</span>':''}</div>
+      <div class="gv">${vs}</div>
+      <div class="gu">${x(cfg.unit)}</div>
+      <div class="gb"><div class="gf" style="width:${pct}%"></div></div>
+    </div>`;
+  }).join('');
+
+  // botões de gráfico e alarme para cada item
+  const btns = grp.items.map(item=>{
+    const cfg=tCfg[item.id]; if(!cfg) return '';
+    return `<button class="btn-sm" onclick="event.stopPropagation();abrirG('${item.id}')" title="${x(item.lbl||cfg.label)} — Gráfico">📈 ${x(item.lbl||'')}</button>
+<button class="btn-sm" onclick="event.stopPropagation();abrirL('${item.id}')" title="Limites">⚙</button>`;
+  }).join('');
+
+  // alarme mais grave do grupo
+  const worstAl = grp.items.reduce((w,item)=>{
+    const al=dados[item.id]?.alarme||'normal';
+    if(al==='hihi') return 'hihi';
+    if(al!=='normal'&&w==='normal') return al;
+    return w;
+  },'normal');
+
+  return `<div class="grp-hdr">${x(grp.title)}${eqB}</div>
+<div class="grp-grid ${colsClass}">${cells}</div>
+<div class="grp-foot">${btns}</div>
+<div class="tsm" style="margin-top:4px">⏱ ${ts}</div>`;
+}
+
+function grupoAlarm(grp){
+  return grp.items.reduce((w,item)=>{
+    const al=dados[item.id]?.alarme||'normal';
+    if(al==='hihi') return 'hihi';
+    if(al!=='normal'&&w==='normal') return al;
+    return w;
+  },'normal');
+}
+
+function pairHTML(cfgC, cfgV){
+  const dC=dados[cfgC.id]||{}, dV=dados[cfgV.id]||{};
+  const alC=dC.alarme||'normal', alV=dV.alarme||'normal';
+  const equip = cfgC.label.replace('CORRENTE ','').replace('CORRENTE_','');
+  const eqB = typeof eqBadgeHTML!=='undefined' ? eqBadgeHTML(cfgC.id) : '';
+  const ts = dC.ts ? new Date(dC.ts).toLocaleTimeString('pt-BR') : '—';
+
+  function half(cfg, d, al){
+    const v=d.valor??null;
+    const vs=v!==null?Number(v).toLocaleString('pt-BR',{maximumFractionDigits:1}):'---';
+    const pct=v!==null?Math.min(100,Math.max(0,((v-cfg.min)/(cfg.max-cfg.min))*100)):0;
+    const lim=cfg.alarme_hi!=null?`HI:${cfg.alarme_hi}`:cfg.alarme_lo!=null?`LO:${cfg.alarme_lo}`:'';
+    const isCorr = cfg.unit==='A';
+    return `<div class="pair-half ${al!=='normal'?'al-'+al:''}">
+      <div class="ph-lbl">${isCorr?'CORRENTE':'VELOCIDADE'} ${lim?'<span style="color:var(--yellow);font-size:8px">'+lim+'</span>':''}</div>
+      <div class="ph-val">${vs}</div>
+      <div class="ph-unit">${x(cfg.unit)}</div>
+      <div class="ph-bar"><div class="ph-fill" style="width:${pct}%"></div></div>
+      <div style="display:flex;gap:4px;margin-top:5px">
+        <button class="btn-sm" onclick="event.stopPropagation();abrirG('${cfg.id}')" title="Gráfico histórico">📈</button>
+        <button class="btn-sm cfg-btn-pair" onclick="event.stopPropagation();abrirL('${cfg.id}')" title="Editar limites de alarme">⚙</button>
+      </div>
+    </div>`;
+  }
+
+  const worstAl = alC==='hihi'||alV==='hihi'?'hihi':alC!=='normal'||alV!=='normal'?alC!=='normal'?alC:alV:'normal';
+  return `<div class="pair-title">${x(equip)}${eqB}</div>
+<div class="pair-row">
+  ${half(cfgC,dC,alC)}
+  ${half(cfgV,dV,alV)}
+</div>
+<div class="tsm" style="margin-top:4px">⏱ ${ts}</div>`;
+}
+
+function renderGrid(){
+  const g=document.getElementById('grid');
+  g.innerHTML='';
+  const rendered = new Set();
+
+  // 1. Renderizar grupos primeiro (ordem natural dos grupos)
+  GRUPOS.forEach(grp=>{
+    const div=document.createElement('div');
+    const al=grupoAlarm(grp);
+    div.id='c-'+grp.id;
+    div.className='card-grp'+(al!=='normal'?' al-'+al:'');
+    div.innerHTML=grupoHTML(grp);
+    g.appendChild(div);
+    grp.items.forEach(it=>rendered.add(it.id));
+  });
+
+  // 2. Renderizar pares e cards individuais
+  Object.values(tCfg).forEach(cfg=>{
+    if(rendered.has(cfg.id)) return;
+    if(IDS_OCULTAR.has(cfg.id)){ rendered.add(cfg.id); return; }
+    if(PARES_SKIP.has(cfg.id)){ rendered.add(cfg.id); return; }
+
+    const pairId = PARES[cfg.id];
+    if(pairId && tCfg[pairId]){
+      const cfgV=tCfg[pairId];
+      const dC=dados[cfg.id]||{}, dV=dados[pairId]||{};
+      const alC=dC.alarme||'normal', alV=dV.alarme||'normal';
+      const worstAl=alC==='hihi'||alV==='hihi'?'hihi':alC!=='normal'||alV!=='normal'?alC!=='normal'?alC:alV:'normal';
+      const div=document.createElement('div');
+      div.id='c-'+cfg.id;
+      div.className='card-pair'+(worstAl!=='normal'?' al-'+worstAl:'');
+      div.innerHTML=pairHTML(cfg,cfgV);
+      div.addEventListener('click',e=>{if(!e.target.classList.contains('cfg-btn'))abrirG(cfg.id);});
+      g.appendChild(div);
+      rendered.add(cfg.id); rendered.add(pairId);
+    } else {
+      const al=(dados[cfg.id]?.alarme)||'normal';
+      const did_lq2=TAG_TO_DINT[cfg.id];
+      const ff2=did_lq2&&digital[did_lq2]?.falha_fluxo;
+      const effAl2=ff2?'hi':al;
+      const div=document.createElement('div');
+      div.id='c-'+cfg.id;
+      div.className='card'+(effAl2!=='normal'?' al-'+effAl2:'');
+      div.innerHTML=cHTML(cfg,dados[cfg.id]||{});
+      div.addEventListener('click',e=>{if(!e.target.classList.contains('cfg-btn'))abrirG(cfg.id);});
+      g.appendChild(div);
+      rendered.add(cfg.id);
+    }
+  });
+  filtrar();
+}
+
+function cHTML(cfg,d){
+  const v=d.valor??null, al=d.alarme||'normal';
+  const pct=v!==null?Math.min(100,Math.max(0,((v-cfg.min)/(cfg.max-cfg.min))*100)):0;
+  const vs=v!==null?Number(v).toLocaleString('pt-BR',{maximumFractionDigits:2}):'---';
+  const ts=d.ts?new Date(d.ts).toLocaleTimeString('pt-BR'):'—';
+  const bT={hi:'▲ HI',hihi:'▲▲ HI-HI',lo:'▼ LO'};
+  const badge=al!=='normal'?`<div class="albadge">${bT[al]||al}</div>`:'';
+  const limT=cfg.alarme_hihi!=null?`HH:${cfg.alarme_hihi}`:cfg.alarme_hi!=null?`HI:${cfg.alarme_hi}`:cfg.alarme_lo!=null?`LO:${cfg.alarme_lo}`:'';
+  const condH=cfg.condicional_desc?`<div class="cond-lbl">⚡ Alarme condicional</div>`:'';
+  const eqB = typeof eqBadgeHTML!=='undefined' ? eqBadgeHTML(cfg.id) : '';
+  return `${badge}<div class="tn">${x(cfg.tagName)}</div><div class="lbl">${x(cfg.label)}</div><div class="vrow"><div class="val">${vs}</div><div class="unt">${x(cfg.unit)}</div></div><div class="bw"><div class="bbar" style="width:${pct}%"></div></div><div class="lrow"><span>${cfg.min}</span><span style="color:var(--yellow);font-size:9px">${limT}</span><span>${cfg.max}</span></div>${condH}${eqB}<div class="tsm">⏱ ${ts} &nbsp;·&nbsp; 📈 clique para gráfico</div><button class="cfg-btn" onclick="abrirL('${cfg.id}')">⚙</button>`;
+}
+
+function updCard(id){
+  if(IDS_OCULTAR&&IDS_OCULTAR.has(id)) return;
+
+  // 1. Pertence a um grupo?
+  const grp=GRUPOS&&GRUPOS.find(g=>g.items.some(it=>it.id===id));
+  if(grp){
+    const el=document.getElementById('c-'+grp.id); if(!el)return;
+    const al=grupoAlarm(grp);
+    el.className='card-grp'+(al!=='normal'?' al-'+al:'');
+    el.innerHTML=grupoHTML(grp);
+    return;
+  }
+
+  // 2. Par corrente+velocidade?
+  const isSecond=PARES_SKIP&&PARES_SKIP.has(id);
+  const primaryId=isSecond?Object.keys(PARES).find(k=>PARES[k]===id):id;
+  const el=document.getElementById('c-'+primaryId); if(!el)return;
+
+  if(PARES[primaryId]&&tCfg[PARES[primaryId]]){
+    const cfgV=tCfg[PARES[primaryId]];
+    const dC=dados[primaryId]||{}, dV=dados[PARES[primaryId]]||{};
+    const alC=dC.alarme||'normal', alV=dV.alarme||'normal';
+    const worstAl=alC==='hihi'||alV==='hihi'?'hihi':alC!=='normal'||alV!=='normal'?alC!=='normal'?alC:alV:'normal';
+    el.className='card-pair'+(worstAl!=='normal'?' al-'+worstAl:'');
+    el.innerHTML=pairHTML(tCfg[primaryId],cfgV);
+    el.addEventListener('click',e=>{if(!e.target.classList.contains('cfg-btn'))abrirG(primaryId);});
+  } else {
+    const al=dados[id]?.alarme||'normal';
+    const did_lq=TAG_TO_DINT[id];
+    const ff=did_lq&&digital[did_lq]?.falha_fluxo;
+    const effAl=ff?'hi':al;
+    el.className='card'+(effAl!=='normal'?' al-'+effAl:'');
+    el.innerHTML=cHTML(tCfg[id],dados[id]||{});
+    el.addEventListener('click',e=>{if(!e.target.classList.contains('cfg-btn'))abrirG(id);});
+  }
+}
+
+
+function pertenceArea(cfg, area){
+  if(!area) return true;
+  if(area==='__al__') return (dados[cfg.id]?.alarme && dados[cfg.id].alarme!=='normal');
+  // Área 501 ou 502 — verifica tagName e id contêm _501_ ou _502_ ou prefixo equivalente
+  const num = area==='__501__'?'501':'502';
+  const tn  = cfg.tagName.toUpperCase();
+  const id  = cfg.id;
+  return tn.includes('_'+num) || tn.startsWith(num) || id.includes('_'+num) || id.includes(num+'bm') || id.startsWith('totalizador_'+num);
+}
+
+function filtrar(){
+  const txt=document.getElementById('fbusca').value.toLowerCase();
+  const area=document.getElementById('farea').value;
+  document.querySelectorAll('.card,.card-pair,.card-grp').forEach(el=>{
+    const id=el.id.slice(2);
+    // card-grp
+    const grp=GRUPOS&&GRUPOS.find(g=>g.id===id);
+    if(grp){
+      const mT=!txt||grp.items.some(it=>{const cf=tCfg[it.id];return cf&&(cf.label.toLowerCase().includes(txt)||cf.tagName.toLowerCase().includes(txt));});
+      const mA=!area||area==='__al__'?(!area||grp.items.some(it=>dados[it.id]?.alarme&&dados[it.id].alarme!=='normal')):grp.items.some(it=>{const cf=tCfg[it.id];return cf&&pertenceArea(cf,area);});
+      el.style.display=mT&&mA?'':'none'; return;
+    }
+    const cfg=tCfg[id]; if(!cfg)return;
+    const pairId=PARES[id]; const cfgV=pairId?tCfg[pairId]:null;
+    const mT=!txt||(cfg.label.toLowerCase().includes(txt)||cfg.tagName.toLowerCase().includes(txt))||(cfgV&&(cfgV.label.toLowerCase().includes(txt)||cfgV.tagName.toLowerCase().includes(txt)));
+    const mA=pertenceArea(cfg,area)||(cfgV&&pertenceArea(cfgV,area));
+    el.style.display=mT&&mA?'':'none';
+  });
+}
+
+function updBanner(){
+  const n=alarms.filter(a=>!a.retorno).length;
+  const b=document.getElementById('banner'), g=document.getElementById('badge');
+  if(n>0){b.classList.add('show');b.textContent=`⚠️  ${n} alarme(s) ativo(s) — acesse "Log de Alarmes" para detalhes`;g.textContent=n;g.style.display='';}
+  else{b.classList.remove('show');g.style.display='none';}
+}
+
+function renderLog(){
+  const tb=document.getElementById('log-body');
+  document.getElementById('logcnt').textContent=alarms.length+' registro(s)';
+  if(!alarms.length){tb.innerHTML='<tr><td colspan="10" style="color:var(--sub);text-align:center;padding:28px">Nenhum alarme registrado</td></tr>';return;}
+  tb.innerHTML=alarms.slice(0,500).map(a=>{
+    const ativo=!a.retorno;
+    const sit=ativo?'<span class="s-ativo">● ATIVO</span>':'<span class="s-ok">✓ Normalizado</span>';
+    const ret=ativo?'<span class="s-ativo">EM CURSO</span>':'<span class="s-ok">'+new Date(a.retorno).toLocaleString('pt-BR')+'</span>';
+    const ack=a.ack?`<span class="ack-ok">✓ ${x(a.ackUser||'')}</span>`:`<button class="btn-ack" onclick="ackAl('${a.id}')">Reconhecer</button>`;
+    const cond=a.condicional?`<span style="font-size:9px;color:var(--orange)" title="${x(a.condicional)}">⚡ cond.</span>`:'—';
+    return `<tr><td>${new Date(a.ts).toLocaleString('pt-BR')}</td><td style="font-family:monospace;font-size:10px">${x(a.tagName)}</td><td>${x(a.label)}</td><td><span class="tp tp-${a.tipo}">${a.tipo.toUpperCase()}</span></td><td><b>${a.valor}</b> ${x(a.unidade)}</td><td>${a.limite} ${x(a.unidade)}</td><td>${cond}</td><td>${ret}</td><td>${sit}</td><td>${ack}</td></tr>`;
+  }).join('');
+  updBanner();
+}
+
+function ackAl(id){
+  const u=prompt('Identificação do operador:','Operador'); if(u===null)return;
+  fetch('/api/alarmes/'+id+'/ack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuario:u})})
+    .then(r=>r.json()).then(r=>{if(r.ok){const a=alarms.find(x=>x.id===id);if(a){a.ack=true;a.ackUser=u;a.ackTs=Date.now();}renderLog();}});
+}
+function expAl(){window.open('/api/exportar_alarmes','_blank');}
+
+// Modal Limites
+function abrirL(id){
+  limId=id; const c=tCfg[id];
+  document.getElementById('msub').textContent=c.label+'\n'+c.tagName;
+  document.getElementById('i-hihi').value=c.alarme_hihi??'';
+  document.getElementById('i-hi').value=c.alarme_hi??'';
+  document.getElementById('i-lo').value=c.alarme_lo??'';
+  document.getElementById('ov').classList.add('open');
+}
+function fechaL(){document.getElementById('ov').classList.remove('open');limId=null;}
+
+// ─── Edição/correção manual de dados de produção de um turno ──────────────
+function abrirEditProd(turnoId){
+  const t = window._turnosPorId && window._turnosPorId[turnoId];
+  if(!t){ alert('Turno não encontrado — atualiza a tabela e tenta de novo.'); return; }
+  window._editProdTurnoId = turnoId;
+  document.getElementById('editProdSub').textContent = `Turno: ${turnoId} (${t.data} — ${t.turno})`;
+  document.getElementById('editProdLinha').value = '501';
+  preencherCamposEditProd('501');
+  document.getElementById('ovEditProd').classList.add('open');
+}
+function fecharEditProd(){
+  document.getElementById('ovEditProd').classList.remove('open');
+  window._editProdTurnoId = null;
+}
+function preencherCamposEditProd(linha){
+  const t = window._turnosPorId && window._turnosPorId[window._editProdTurnoId];
+  if(!t) return;
+  const minWrap = document.getElementById('editProdMinWrap');
+  if(linha === 'total'){
+    const tot = t.total || {};
+    document.getElementById('editProdTon').value = tot.tonProduzida ?? '';
+    document.getElementById('editProdKwh').value = tot.kwh ?? '';
+    document.getElementById('editProdKwht').value = tot.kwht ?? '';
+    document.getElementById('editProdMin').value = '';
+    minWrap.style.display = 'none';
+  } else {
+    const l = linha==='501' ? t.linha501 : t.linha502;
+    document.getElementById('editProdTon').value = l?.tonProduzida ?? '';
+    document.getElementById('editProdMin').value = l?.minRodando ?? '';
+    document.getElementById('editProdKwh').value = l?.kwh ?? '';
+    document.getElementById('editProdKwht').value = l?.kwhtClpMedia ?? l?.kwht ?? '';
+    minWrap.style.display = '';
+  }
+}
+async function salvarEditProd(){
+  const turnoId = window._editProdTurnoId;
+  if(!turnoId) return;
+  const linha = document.getElementById('editProdLinha').value;
+  const vTon = document.getElementById('editProdTon').value;
+  const vMin = document.getElementById('editProdMin').value;
+  const vKwh = document.getElementById('editProdKwh').value;
+  const vKwht = document.getElementById('editProdKwht').value;
+  const campos = {};
+  if(vTon !== '') campos.tonProduzida = parseFloat(vTon);
+  if(vKwh !== '') campos.kwh = parseFloat(vKwh);
+  if(linha === 'total'){
+    if(vKwht !== '') campos.kwht = parseFloat(vKwht);
+  } else {
+    if(vMin !== '') campos.minRodando = parseFloat(vMin);
+    if(vKwht !== '') campos.kwhtClpMedia = parseFloat(vKwht);
+  }
+  if(Object.keys(campos).length === 0){ alert('Preenche pelo menos um campo pra corrigir.'); return; }
+  try{
+    const r = await fetch(`/api/producao/turno/${encodeURIComponent(turnoId)}/corrigir`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ linha, campos }),
+    });
+    const j = await r.json();
+    if(!r.ok){ alert('Erro ao salvar: ' + (j.erro || 'desconhecido')); return; }
+    fecharEditProd();
+    carregarProducao();
+  }catch(e){
+    alert('Erro ao salvar: ' + e.message);
+  }
+}
+function salvaL(){
+  if(!limId)return;
+  fetch('/api/limites/'+limId,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({alarme_hi:document.getElementById('i-hi').value.trim()||null,alarme_hihi:document.getElementById('i-hihi').value.trim()||null,alarme_lo:document.getElementById('i-lo').value.trim()||null})
+  }).then(r=>r.json()).then(r=>{if(r.ok){if(tCfg[limId])Object.assign(tCfg[limId],r.limites);updCard(limId);fechaL();}});
+}
+
+// Modal Gráfico
+function parsePer(){
+  const sel=document.getElementById('g-per').value, now=Date.now();
+  if(sel==='custom'){
+    const i=document.getElementById('g-ini').value, f=document.getElementById('g-fim').value;
+    const ini=i?new Date(i).getTime():now-86400000, fim=f?new Date(f).getTime():now;
+    return{inicio:ini,fim:fim,dias:(fim-ini)/86400000};
+  }
+  let ms; if(sel.endsWith('d'))ms=parseFloat(sel)*86400000; else ms=parseFloat(sel)*3600000;
+  return{inicio:now-ms,fim:now,dias:ms/86400000};
+}
+function onPerChange(){
+  const v=document.getElementById('g-per').value;
+  document.getElementById('g-cust').style.display=v==='custom'?'flex':'none';
+  if(v!=='custom')carregaG();
+}
+async function abrirG(id){
+  grafId=id; const cfg=tCfg[id];
+  document.getElementById('g-tit').textContent=cfg.label;
+  document.getElementById('g-tn').textContent=cfg.tagName;
+  document.getElementById('gov').classList.add('open');
+  document.getElementById('g-per').value='1d';
+  document.getElementById('g-cust').style.display='none';
+  await carregaG();
+}
+function fechaG(){
+  document.getElementById('gov').classList.remove('open');
+  if(gChart){gChart.destroy();gChart=null;}
+  grafId=null;
+}
+async function carregaG(){
+  if(!grafId)return;
+  const cfg=tCfg[grafId];
+  const {inicio,fim,dias}=parsePer();
+  document.getElementById('gstat').textContent='Carregando...';
+  const usaA=(fim-inicio)>7200000;
+  const ep=usaA?`/api/grafico/${grafId}?inicio=${inicio}&fim=${fim}&dias=${dias}`:`/api/historico/${grafId}?inicio=${inicio}&fim=${fim}`;
+  let pts=[];
+  try{const r=await fetch(ep);const j=await r.json();pts=usaA?(j.amostras||[]):(j.registros||[]);}
+  catch(e){document.getElementById('gstat').textContent='Erro ao carregar dados.';return;}
+  const labels=pts.map(p=>new Date(p.ts).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',second:pts.length<200?'2-digit':undefined}));
+  const vals=pts.map(p=>p.v);
+  if(vals.length>0){
+    const mn=Math.min(...vals).toLocaleString('pt-BR',{maximumFractionDigits:2});
+    const mx=Math.max(...vals).toLocaleString('pt-BR',{maximumFractionDigits:2});
+    const av=(vals.reduce((a,b)=>a+b,0)/vals.length).toLocaleString('pt-BR',{maximumFractionDigits:2});
+    const ul=vals[vals.length-1].toLocaleString('pt-BR',{maximumFractionDigits:2});
+    document.getElementById('gstat').innerHTML=`<span>${pts.length} pontos</span><span>Atual: <b>${ul} ${x(cfg.unit)}</b></span><span>Mín: <b>${mn}</b></span><span>Máx: <b>${mx}</b></span><span>Média: <b>${av}</b></span>`;
+  } else {document.getElementById('gstat').textContent='Sem dados no período selecionado.';}
+  const ds=[{label:cfg.label,data:vals,borderColor:'#58a6ff',backgroundColor:'rgba(88,166,255,.07)',borderWidth:1.5,pointRadius:pts.length>300?0:2,pointHoverRadius:4,fill:true,tension:0.2}];
+  if(cfg.alarme_hi!=null)ds.push({label:'HI ('+cfg.alarme_hi+')',data:Array(vals.length).fill(cfg.alarme_hi),borderColor:'rgba(210,153,34,.8)',borderWidth:1.5,borderDash:[5,4],pointRadius:0,fill:false});
+  if(cfg.alarme_hihi!=null)ds.push({label:'HI-HI ('+cfg.alarme_hihi+')',data:Array(vals.length).fill(cfg.alarme_hihi),borderColor:'rgba(248,81,73,.8)',borderWidth:1.5,borderDash:[5,4],pointRadius:0,fill:false});
+  if(cfg.alarme_lo!=null)ds.push({label:'LO ('+cfg.alarme_lo+')',data:Array(vals.length).fill(cfg.alarme_lo),borderColor:'rgba(219,109,40,.8)',borderWidth:1.5,borderDash:[5,4],pointRadius:0,fill:false});
+  if(gChart){gChart.destroy();}
+  const ctx=document.getElementById('gcanvas').getContext('2d');
+  gChart=new Chart(ctx,{type:'line',data:{labels,datasets:ds},options:{animation:false,responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#8b949e',font:{size:11},boxWidth:18}},tooltip:{mode:'index',intersect:false,backgroundColor:'#21262d',borderColor:'#30363d',borderWidth:1,titleColor:'#e6edf3',bodyColor:'#8b949e',callbacks:{label:c=>` ${c.dataset.label}: ${Number(c.parsed.y).toLocaleString('pt-BR',{maximumFractionDigits:2})} ${cfg.unit}`}}},scales:{x:{ticks:{color:'#8b949e',maxTicksLimit:10,maxRotation:0,font:{size:10}},grid:{color:'rgba(48,54,61,.6)'}},y:{ticks:{color:'#8b949e',font:{size:11}},grid:{color:'rgba(48,54,61,.6)'},title:{display:true,text:cfg.unit,color:'#8b949e',font:{size:11}}}}}});
+}
+async function expG(){
+  if(!grafId)return;
+  const{inicio,fim,dias}=parsePer();
+  window.open(`/api/exportar/${grafId}?inicio=${inicio}&fim=${fim}&dias=${Math.ceil(dias)}`,'_blank');
+}
+function x(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+// ─── Status Digital — Badges nos cards ───────────────────────────────────────
+// Mapa: tagId analógico → id do DINT correspondente
+const TAG_TO_DINT = {
+  'ea_501bm140_it_u01':'m_501bm140','ea_501bm140_jt_u01':'m_501bm140',
+  'ea_501bm140_tt_u01':'m_501bm140','ea_501bm140_tt_u04':'m_501bm140',
+  'ea_501bm140_tt_u06':'m_501bm140','ea_501bm140_db_u01':'m_501bm140',
+  'ea_501bm140_wt_u01':'m_501bm140','ea_501bm140_pt_u01':'m_501bm140',
+  'ea_rede_501bc035_c':'m_501bc035','ea_rede_501bc035_v':'m_501bc035',
+  'ea_rede_501be060_c':'m_501be060','ea_rede_501be060_v':'m_501be060',
+  'ea_rede_501be090_c':'m_501be090','ea_rede_501be090_v':'m_501be090',
+  'ea_rede_501fn042_c':'m_501fn042','ea_rede_501fn042_v':'m_501fn042',
+  'ea_rede_501sc041_c':'m_501sc041','ea_rede_501sc041_v':'m_501sc041',
+  'ea_rede_501wf005_c':'m_501wf005','ea_rede_501wf005_v':'m_501wf005',
+  'ea_rede_501wf010_c':'m_501wf010','ea_rede_501wf010_v':'m_501wf010',
+  'ea_501md070_tt_u01':'m_501md070','ea_501md070_it_u01':'m_501md070',
+  'ea_501lq145a01_pt':'m_501lq145a01','ea_501lq145a02_pt':'m_501lq145a02',
+  'ea_501wp001_tt_u01':'m_501wp001',
+  'ea_502bm140_it_u01':'m_502bm140','ea_502bm140_jt_u01':'m_502bm140',
+  'ea_502bm140_tt_u01':'m_502bm140','ea_502bm140_tt_u04':'m_502bm140',
+  'ea_502bm140_tt_u06':'m_502bm140','ea_502bm140_db_u01':'m_502bm140',
+  'ea_502bm140_wt_u01':'m_502bm140','ea_502bm140_pt_u01':'m_502bm140',
+  'ea_rede_502bc035_c':'m_502bc035','ea_rede_502bc035_v':'m_502bc035',
+  'ea_rede_502be060_c':'m_502be060','ea_rede_502be060_v':'m_502be060',
+  'ea_rede_502be090_c':'m_502be090','ea_rede_502be090_v':'m_502be090',
+  'ea_rede_502fn042_c':'m_502fn042','ea_rede_502fn042_v':'m_502fn042',
+  'ea_rede_502sc041_c':'m_502sc041','ea_rede_502sc041_v':'m_502sc041',
+  'ea_rede_502wf005_c':'m_502wf005','ea_rede_502wf005_v':'m_502wf005',
+  'ea_rede_502wf010_c':'m_502wf010','ea_rede_502wf010_v':'m_502wf010',
+  'ea_502md070_tt_u01':'m_502md070','ea_502md070_it_u01':'m_502md070',
+  'ea_502lq145a01_pt':'m_502lq145a01','ea_502lq145a02_pt':'m_502lq145a02',
+  'ea_502wp001_tt_u01':'m_502wp001',
+};
+
+function eqBadgeHTML(tagId){
+  const did = TAG_TO_DINT[tagId];
+  if(!did) return '';
+  const d = digital[did];
+  if(!d) return '';
+  let badges = '';
+  if(d.falha)
+    badges += `<span class="eq-badge eq-fault">⚠ FALHA</span>`;
+  else if(d.falha_fluxo)
+    badges += `<span class="eq-badge eq-fault">⚠ SEM FLUXO</span>`;
+  else if(d.ligado)
+    badges += `<span class="eq-badge eq-on">● LIGADO</span>`;
+  else
+    badges += `<span class="eq-badge eq-off">○ DESLIGADO</span>`;
+  if(d.fluxo) badges += `<span class="eq-badge eq-flow">〜 FLUXO</span>`;
+  return `<div style="margin-top:4px">${badges}</div>`;
+}
+
+// Patch cHTML para incluir badge de status
+const _cHTML_orig = cHTML;
+
+// ─── Sinótico SVG ─────────────────────────────────────────────────────────────
+function goPage(id,el){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('#snav a').forEach(a=>a.classList.remove('active'));
+  document.getElementById('page-'+id).classList.add('active');
+  el.classList.add('active');
+  document.getElementById('ptitle').textContent=TITULOS[id]||id;
+  if(id==='indicadores'&&Object.keys(tCfg).length) carregarIndicadores();
+  if(id==='producao') iniciarPaginaProducao();
+}
+
+
+// ─── Indicadores ─────────────────────────────────────────────────────────────
+let indCharts = {};
+
+function fmt(v, dec=1){ return v!=null ? Number(v).toLocaleString('pt-BR',{maximumFractionDigits:dec}) : '—'; }
+
+function kpiClass(v, bom, ruim){
+  if(v==null) return '';
+  if(v >= bom) return 'kpi-ok';
+  if(v >= ruim) return 'kpi-warn';
+  return 'kpi-bad';
+}
+
+function renderKPIs(el, d){
+  // Disponibilidade
+  const dispCls = kpiClass(d.disponibilidade, 90, 70);
+  // Performance
+  const perfCls = kpiClass(d.performance, 90, 70);
+  // OEE
+  const oeeCls  = kpiClass(d.oee, 80, 60);
+  // kW/t — menor é melhor
+  const kwhtCls = d.kwht==null?'': d.kwht<=35?'kpi-ok': d.kwht<=42?'kpi-warn':'kpi-bad';
+  // Mancal — menor é melhor
+  const mancCls = d.tempMancalMax==null?'': d.tempMancalMax<60?'kpi-ok': d.tempMancalMax<70?'kpi-warn':'kpi-bad';
+
+  el.innerHTML = `
+    <div class="kpi"><div class="kpi-lbl">⚡ Potência atual</div><div class="kpi-val">${fmt(d.atual?.pot,0)}</div><div class="kpi-unit">kW</div></div>
+    <div class="kpi"><div class="kpi-lbl">📦 Produção atual</div><div class="kpi-val">${fmt(d.atual?.tonh,1)}</div><div class="kpi-unit">t/h</div></div>
+    <div class="kpi"><div class="kpi-lbl">⚡ Potência média</div><div class="kpi-val">${fmt(d.potMedia,0)}</div><div class="kpi-unit">kW (motor+aux)</div></div>
+    <div class="kpi"><div class="kpi-lbl">📦 Produção média</div><div class="kpi-val">${fmt(d.tonHMedia,1)}</div><div class="kpi-unit">t/h (período)</div></div>
+    <div class="kpi"><div class="kpi-lbl">🔋 kWh consumido</div><div class="kpi-val">${fmt(d.kwhTotal,0)}</div><div class="kpi-unit">kWh no período</div></div>
+    <div class="kpi"><div class="kpi-lbl">📊 Produção total</div><div class="kpi-val">${fmt(d.tonTotal,1)}</div><div class="kpi-unit">t no período</div></div>
+    <div class="kpi ${kwhtCls}"><div class="kpi-lbl">⚙ kW/t</div><div class="kpi-val">${fmt(d.kwht,2)}</div><div class="kpi-unit">kW/t</div></div>
+    <div class="kpi ${mancCls}"><div class="kpi-lbl">🌡 Mancal máx.</div><div class="kpi-val">${fmt(d.tempMancalMax,1)}</div><div class="kpi-unit">°C</div></div>
+    <div class="kpi ${dispCls}" style="grid-column:span 2">
+      <div class="kpi-lbl">🟢 Disponibilidade</div>
+      <div class="kpi-val">${fmt(d.disponibilidade,1)}<span style="font-size:14px">%</span></div>
+      <div class="oee-bar"><div class="oee-fill" style="width:${d.disponibilidade||0}%;background:${dispCls==='kpi-ok'?'var(--green)':dispCls==='kpi-warn'?'var(--yellow)':'var(--red)'}"></div></div>
+    </div>
+    <div class="kpi ${perfCls}" style="grid-column:span 2">
+      <div class="kpi-lbl">🎯 Performance (nominal: ${d.nominalTonH} t/h)</div>
+      <div class="kpi-val">${fmt(d.performance,1)}<span style="font-size:14px">%</span></div>
+      <div class="oee-bar"><div class="oee-fill" style="width:${d.performance||0}%;background:${perfCls==='kpi-ok'?'var(--green)':perfCls==='kpi-warn'?'var(--yellow)':'var(--red)'}"></div></div>
+    </div>
+    <div class="kpi ${oeeCls}" style="grid-column:span 2">
+      <div class="kpi-lbl">📈 OEE (Disp. × Perf.)</div>
+      <div class="kpi-val">${fmt(d.oee,1)}<span style="font-size:14px">%</span></div>
+      <div class="oee-bar"><div class="oee-fill" style="width:${d.oee||0}%;background:${oeeCls==='kpi-ok'?'var(--green)':oeeCls==='kpi-warn'?'var(--yellow)':'var(--red)'}"></div></div>
+    </div>`;
+}
+
+function criarOuAtualizarChart(id, labels501, labels502, data501, data502, cor1, cor2, label1, label2, yLabel){
+  const ctx = document.getElementById(id).getContext('2d');
+  if(indCharts[id]){ indCharts[id].destroy(); }
+  // Unir labels
+  const todosTs = [...new Set([...labels501,...labels502])].sort((a,b)=>a-b);
+  const map501 = Object.fromEntries(labels501.map((t,i)=>[t,data501[i]]));
+  const map502 = Object.fromEntries(labels502.map((t,i)=>[t,data502[i]]));
+  const lblFmt = todosTs.map(t=>new Date(t).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}));
+  indCharts[id] = new Chart(ctx,{
+    type:'line',
+    data:{
+      labels: lblFmt,
+      datasets:[
+        {label:label1,data:todosTs.map(t=>map501[t]??null),borderColor:cor1,backgroundColor:cor1+'18',borderWidth:2,pointRadius:2,fill:true,tension:0.2,spanGaps:true},
+        {label:label2,data:todosTs.map(t=>map502[t]??null),borderColor:cor2,backgroundColor:cor2+'18',borderWidth:2,pointRadius:2,fill:true,tension:0.2,spanGaps:true},
+      ]
+    },
+    options:{
+      animation:false,responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#8b949e',font:{size:11},boxWidth:14}},
+        tooltip:{mode:'index',intersect:false,backgroundColor:'#21262d',borderColor:'#30363d',borderWidth:1,titleColor:'#e6edf3',bodyColor:'#8b949e'}},
+      scales:{
+        x:{ticks:{color:'#8b949e',maxTicksLimit:10,maxRotation:0,font:{size:9}},grid:{color:'rgba(48,54,61,.5)'}},
+        y:{ticks:{color:'#8b949e',font:{size:10}},grid:{color:'rgba(48,54,61,.5)'},title:{display:true,text:yLabel,color:'#8b949e',font:{size:10}}}
+      }
+    }
+  });
+}
+
+async function carregarIndicadores(){
+  const horas   = parseInt(document.getElementById('ind-per').value) || 24;
+  const nominal = parseFloat(document.getElementById('ind-nominal').value) || 30;
+  const fim     = Date.now();
+  const inicio  = fim - horas * 3600000;
+  document.getElementById('ind-ts').textContent = 'Carregando...';
+  try {
+    const [r501, r502] = await Promise.all([
+      fetch(`/api/indicadores/501?inicio=${inicio}&fim=${fim}&nominal=${nominal}`).then(r=>r.json()),
+      fetch(`/api/indicadores/502?inicio=${inicio}&fim=${fim}&nominal=${nominal}`).then(r=>r.json()),
+    ]);
+    renderKPIs(document.getElementById('kpis-501'), r501);
+    renderKPIs(document.getElementById('kpis-502'), r502);
+    // Gráficos
+    const ts501 = r501.historicoHorario.map(h=>h.ts);
+    const ts502 = r502.historicoHorario.map(h=>h.ts);
+    criarOuAtualizarChart('ch-tonh', ts501, ts502,
+      r501.historicoHorario.map(h=>h.tonh), r502.historicoHorario.map(h=>h.tonh),
+      '#58a6ff','#3fb950','501 t/h','502 t/h','t/h');
+    criarOuAtualizarChart('ch-pot', ts501, ts502,
+      r501.historicoHorario.map(h=>h.pot), r502.historicoHorario.map(h=>h.pot),
+      '#58a6ff','#3fb950','501 kW','502 kW','kW');
+    criarOuAtualizarChart('ch-kwht', ts501, ts502,
+      r501.historicoHorario.map(h=>h.kwht), r502.historicoHorario.map(h=>h.kwht),
+      '#58a6ff','#3fb950','501 kW/t','502 kW/t','kW/t');
+    criarOuAtualizarChart('ch-kwh', ts501, ts502,
+      r501.historicoHorario.map(h=>h.kwh), r502.historicoHorario.map(h=>h.kwh),
+      '#58a6ff','#3fb950','501 kWh','502 kWh','kWh');
+    document.getElementById('ind-ts').textContent =
+      'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
+  } catch(e) {
+    document.getElementById('ind-ts').textContent = 'Erro ao carregar indicadores';
+  }
+}
+
+
+
+// Adapter de tempo (luxon) — usado pelos gráficos com eixo de tempo
+(function(){
+  if(window._luxonLoaded)return;
+  window._luxonLoaded=true;
+  const s=document.createElement('script');
+  s.src='https://cdnjs.cloudflare.com/ajax/libs/luxon/3.4.4/luxon.min.js';
+  s.onload=()=>{
+    const a=document.createElement('script');
+    a.src='https://cdnjs.cloudflare.com/ajax/libs/chartjs-adapter-luxon/1.3.1/chartjs-adapter-luxon.umd.min.js';
+    document.head.appendChild(a);
+  };
+  document.head.appendChild(s);
+})();
+
+// ─── DADOS DE PRODUÇÃO ────────────────────────────────────────────────────────
+let prodCharts = {};
+
+function fmtN(v,d=1){ return v!=null?Number(v).toLocaleString('pt-BR',{maximumFractionDigits:d}):'—'; }
+function turnoIcon(t){ return t==='diurno'?'☀️':'🌙'; }
+function turnoColor(t){ return t==='diurno'?'#f5c518':'#8888ff'; }
+
+// Card duplo de comparação kW/t
+function kpiProdDuplo(lbl, valTurno, valLive) {
+  function cor(v) {
+    if (v == null) return 'var(--sub)';
+    return v <= 38 ? 'var(--green)' : v <= 45 ? 'var(--yellow)' : 'var(--red)';
+  }
+  function badge(v) {
+    if (v == null) return 'var(--bg3)';
+    return v <= 38 ? 'rgba(63,185,80,.15)' : v <= 45 ? 'rgba(210,153,34,.15)' : 'rgba(248,81,73,.15)';
+  }
+  const diff = (valTurno != null && valLive != null)
+    ? parseFloat((valLive - valTurno).toFixed(2)) : null;
+  const diffTxt = diff != null
+    ? `<span style="font-size:9px;color:${Math.abs(diff)<=2?'var(--sub)':Math.abs(diff)<=5?'var(--yellow)':'var(--red)'}">vs média ${diff>0?'+':''}${diff}</span>`
+    : '';
+  return `<div style="background:var(--bg3);border-radius:8px;padding:10px 12px;flex:1;min-width:190px">
+    <div style="font-size:10px;color:var(--sub);margin-bottom:6px;font-weight:600">${lbl} — kW/t</div>
+    <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+      <div style="flex:1;background:${badge(valTurno)};border-radius:6px;padding:6px 8px;min-width:80px">
+        <div style="font-size:9px;color:var(--sub);margin-bottom:2px">Média do turno</div>
+        <div style="font-size:9px;color:var(--sub);margin-bottom:4px">(só moinho rodando)</div>
+        <div style="font-size:22px;font-weight:700;font-family:monospace;color:${cor(valTurno)}">${valTurno!=null?fmtN(valTurno,2):'—'}</div>
+        <div style="font-size:9px;color:var(--sub)">kW/t</div>
+      </div>
+      ${valLive != null ? `<div style="flex:1;background:${badge(valLive)};border-radius:6px;padding:6px 8px;min-width:80px">
+        <div style="font-size:9px;color:var(--sub);margin-bottom:2px">Instantâneo</div>
+        <div style="font-size:9px;color:var(--sub);margin-bottom:4px">(agora ao vivo)</div>
+        <div style="font-size:22px;font-weight:700;font-family:monospace;color:${cor(valLive)}">${fmtN(valLive,2)}</div>
+        <div style="font-size:9px;color:var(--sub)">kW/t ${diffTxt}</div>
+      </div>` : ''}
+    </div>
+  </div>`;
+}
+
+function kpiProd(lbl, val, unit, cor, sub=''){
+  return `<div style="background:var(--bg3);border-radius:8px;padding:12px;min-width:120px;flex:1">
+    <div style="font-size:10px;color:var(--sub);margin-bottom:3px">${lbl}</div>
+    <div style="font-size:22px;font-weight:700;font-family:monospace;color:${cor||'var(--text)'}">${val}</div>
+    <div style="font-size:10px;color:var(--sub)">${unit}${sub?'<br><span style="color:var(--blue)">'+sub+'</span>':''}</div>
+  </div>`;
+}
+
+function renderCorrenteProd(c) {
+  if(!c) return;
+  const l5=c.linha501, l2=c.linha502, tot=c.total;
+  const hEl = hrs => { const h=Math.floor(hrs); const m=Math.round((hrs-h)*60); return `${h}h${m.toString().padStart(2,'0')}m`; };
+  const minH = m => hEl(m/60);
+  document.getElementById('prod-corrente').innerHTML = `
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:8px">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+      <span style="font-size:16px">${turnoIcon(c.turno)}</span>
+      <span style="font-weight:700;font-size:14px">TURNO ${c.turno.toUpperCase()} — ${c.data} &nbsp;·&nbsp; Em andamento</span>
+      <span style="background:rgba(63,185,80,.15);color:var(--green);font-size:11px;padding:2px 8px;border-radius:10px;border:1px solid var(--green)">● AO VIVO</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+      <!-- 501 -->
+      <div>
+        <div style="font-size:11px;font-weight:600;color:#58a6ff;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border)">Moinho 501BM140</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${kpiProd('t/h Média',fmtN(l5.thMedia,2),'t/h','#58a6ff')}
+          ${kpiProd('Produção',fmtN(l5.tonProduzida,1),'ton',l5.tonProduzida>100?'var(--green)':'var(--yellow)')}
+          ${kpiProd('Pot. Média',fmtN(l5.potMedia,0),'kW (motor+aux)','#f0a040',l5.potMedia!=null?'quando rodando':'')}
+          ${kpiProd('Energia',fmtN(l5.kwh,0),'kWh','#bc8cff',l5.kwh!=null?(l5.fonteKwh==='CLP'?'✔ dado CLP':'≈ calculado (trapézio)'):'')}
+          ${kpiProd('kW/t',fmtN(l5.kwhtClpMedia,2),'kW/t',l5.kwhtClpMedia!=null?(l5.kwhtClpMedia<=38?'var(--green)':l5.kwhtClpMedia<=45?'var(--yellow)':'var(--red)'):'var(--sub)',l5.fonteKwht==='CLP'?'✔ dado CLP':'≈ calculado (Pot/t-h)')}
+          ${kpiProd('Tempo rodando',minH(l5.minRodando),l5.minRodando+' min','#8b949e',l5.fonteDados==='CLP'?'✔ dado CLP':'≈ estimado')}
+        </div>
+      </div>
+      <!-- 502 -->
+      <div>
+        <div style="font-size:11px;font-weight:600;color:#3fb950;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border)">Moinho 502BM140</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${kpiProd('t/h Média',fmtN(l2.thMedia,2),'t/h','#3fb950')}
+          ${kpiProd('Produção',fmtN(l2.tonProduzida,1),'ton',l2.tonProduzida>100?'var(--green)':'var(--yellow)')}
+          ${kpiProd('Pot. Média',fmtN(l2.potMedia,0),'kW (motor+aux)','#f0a040',l2.potMedia!=null?'quando rodando':'')}
+          ${kpiProd('Energia',fmtN(l2.kwh,0),'kWh','#bc8cff',l2.kwh!=null?(l2.fonteKwh==='CLP'?'✔ dado CLP':'≈ calculado (trapézio)'):'')}
+          ${kpiProd('kW/t',fmtN(l2.kwhtClpMedia,2),'kW/t',l2.kwhtClpMedia!=null?(l2.kwhtClpMedia<=38?'var(--green)':l2.kwhtClpMedia<=45?'var(--yellow)':'var(--red)'):'var(--sub)',l2.fonteKwht==='CLP'?'✔ dado CLP':'≈ calculado (Pot/t-h)')}
+          ${kpiProd('Tempo rodando',minH(l2.minRodando),l2.minRodando+' min','#8b949e',l2.fonteDados==='CLP'?'✔ dado CLP':'≈ estimado')}
+        </div>
+      </div>
+      <!-- TOTAL -->
+      <div>
+        <div style="font-size:11px;font-weight:600;color:#d29922;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border)">TOTAL DUAS LINHAS</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${kpiProd('t/h Total',fmtN(tot.thMedia,2),'t/h','#d29922')}
+          ${kpiProd('Produção',fmtN(tot.tonProduzida,1),'ton',tot.tonProduzida>200?'var(--green)':'var(--yellow)')}
+          ${kpiProd('Energia',fmtN(tot.kwh,0),'kWh','#bc8cff','soma 501+502')}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function criarGraficoProd(id, labels, ds, yLabel) {
+  const ctx = document.getElementById(id)?.getContext('2d');
+  if(!ctx) return;
+  if(prodCharts[id]) prodCharts[id].destroy();
+  prodCharts[id] = new Chart(ctx, {
+    type:'bar',
+    data:{ labels, datasets: ds },
+    options:{
+      animation:false, responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{labels:{color:'#8b949e',font:{size:11},boxWidth:14}},
+        tooltip:{backgroundColor:'#21262d',borderColor:'#30363d',borderWidth:1,titleColor:'#e6edf3',bodyColor:'#8b949e'} },
+      scales:{
+        x:{ticks:{color:'#8b949e',font:{size:9},maxRotation:45},grid:{color:'rgba(48,54,61,.4)'}},
+        y:{ticks:{color:'#8b949e',font:{size:10},callback:v=>Number(v).toLocaleString('pt-BR')},
+           grid:{color:'rgba(48,54,61,.4)'},title:{display:true,text:yLabel,color:'#8b949e',font:{size:10}}}
+      }
+    }
+  });
+}
+
+function renderGraficosProd(dias, turnos) {
+  // Labels = dias
+  const lbls = dias.map(d=>d.dia);
+  // Ton por dia
+  criarGraficoProd('ch-prod-ton', lbls, [
+    {label:'501 (t)',data:dias.map(d=>d.ton501),backgroundColor:'rgba(88,166,255,0.7)',borderColor:'#58a6ff',borderWidth:1},
+    {label:'502 (t)',data:dias.map(d=>d.ton502),backgroundColor:'rgba(63,185,80,0.7)',borderColor:'#3fb950',borderWidth:1},
+  ],'Toneladas');
+  // kW/t — gráfico usa kwhtClpMedia calculado com CF dinâmico
+  criarGraficoProd('ch-prod-kwht', lbls, [
+    {label:'501 kW/t',data:dias.map(d=>{
+      const t=producaoTurnosDia(turnos,d.dia,'501'); return t.kwht;
+    }),type:'line',borderColor:'#58a6ff',backgroundColor:'rgba(88,166,255,0.1)',pointRadius:3,fill:true,tension:0.3,yAxisID:'y'},
+    {label:'502 kW/t',data:dias.map(d=>{
+      const t=producaoTurnosDia(turnos,d.dia,'502'); return t.kwht;
+    }),type:'line',borderColor:'#3fb950',backgroundColor:'rgba(63,185,80,0.1)',pointRadius:3,fill:true,tension:0.3,yAxisID:'y'},
+  ],'kW/t');
+  // kWh
+  criarGraficoProd('ch-prod-kwh', lbls, [
+    {label:'501 kWh',data:dias.map(d=>d.kwh501),backgroundColor:'rgba(188,140,255,0.6)',borderColor:'#bc8cff',borderWidth:1},
+    {label:'502 kWh',data:dias.map(d=>d.kwh502),backgroundColor:'rgba(210,153,34,0.6)',borderColor:'#d29922',borderWidth:1},
+  ],'kWh');
+  // t/h por turno (linha)
+  const turnLbls = turnos.map(t=>`${t.data} ${turnoIcon(t.turno)}`);
+  criarGraficoProd('ch-prod-th', turnLbls, [
+    {label:'501 t/h',data:turnos.map(t=>t.linha501.thMedia),type:'line',borderColor:'#58a6ff',backgroundColor:'rgba(88,166,255,0.1)',pointRadius:3,fill:true,tension:0.3},
+    {label:'502 t/h',data:turnos.map(t=>t.linha502.thMedia),type:'line',borderColor:'#3fb950',backgroundColor:'rgba(63,185,80,0.1)',pointRadius:3,fill:true,tension:0.3},
+  ],'t/h');
+}
+
+function producaoTurnosDia(turnos, dia, linha) {
+  const ts = turnos.filter(t=>t.data===dia);
+  const l = linha==='501'?'linha501':'linha502';
+  // kW/t = (Pot+aux)/t/h — usa kwhtClpMedia, fallback kwht
+  const vals = ts.map(t=>t[l]?.kwhtClpMedia ?? t[l]?.kwht).filter(v=>v!=null);
+  return { kwht: vals.length ? parseFloat((vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(2)) : null };
+}
+
+function renderTabelaTurnos(turnos, totMes) {
+  const tbody = document.getElementById('prod-tbody');
+  if(!turnos.length){tbody.innerHTML='<tr><td colspan="15" style="text-align:center;color:var(--sub);padding:20px">Sem dados no período</td></tr>';return;}
+  // Guarda os dados de cada turno num mapa global pro modal de edição
+  // conseguir preencher os campos sem precisar de um fetch novo.
+  window._turnosPorId = {};
+  turnos.forEach(t => { window._turnosPorId[t.id] = t; });
+  // Linha de totais
+  const totRow = `<tr style="background:rgba(210,153,34,0.1);font-weight:700">
+    <td colspan="2">TOTAL DO MÊS</td>
+    <td>${fmtN(totMes.th501,2)}</td><td>${fmtN(totMes.ton501,1)}</td><td>${fmtN(totMes.kwh501,0)}</td>
+    <td>${fmtN(totMes.kwht501,2)}</td><td>${Math.round(totMes.min501||0)}'</td>
+    <td>${fmtN(totMes.th502,2)}</td><td>${fmtN(totMes.ton502,1)}</td><td>${fmtN(totMes.kwh502,0)}</td>
+    <td>${fmtN(totMes.kwht502,2)}</td><td>${Math.round(totMes.min502||0)}'</td>
+    <td style="color:var(--green)">${fmtN(totMes.tonTotal,1)}</td>
+    <td style="color:var(--green)">${fmtN(totMes.kwht,2)}</td>
+    <td>—</td>
+  </tr>`;
+  tbody.innerHTML = turnos.map(t=>{
+    const l1=t.linha501, l2=t.linha502, tot=t.total;
+    const kwht1 = l1.kwhtClpMedia ?? l1.kwht;
+    const kwht2 = l2.kwhtClpMedia ?? l2.kwht;
+    const kwhtT = (kwht1!=null&&kwht2!=null) ? parseFloat(((kwht1+kwht2)/2).toFixed(2)) : (kwht1??kwht2);
+    const kwhtCor1 = kwht1==null?'':kwht1<=38?'color:var(--green)':kwht1<=45?'color:var(--yellow)':'color:var(--red)';
+    const kwhtCor2 = kwht2==null?'':kwht2<=38?'color:var(--green)':kwht2<=45?'color:var(--yellow)':'color:var(--red)';
+    return `<tr>
+      <td>${t.data}</td>
+      <td>${turnoIcon(t.turno)} ${t.turno}</td>
+      <td>${fmtN(l1.thMedia,2)}</td><td>${fmtN(l1.tonProduzida,1)}</td>
+      <td>${fmtN(l1.kwh,0)}</td><td style="${kwhtCor1}">${fmtN(kwht1,2)}</td>
+      <td title="${l1.fonteDados||''}">${Math.round(l1.minRodando||0)}' ${l1.fonteDados==='CLP'?'<span style="color:var(--green);font-size:9px">CLP</span>':'<span style="color:var(--sub);font-size:9px">est</span>'}</td>
+      <td>${fmtN(l2.thMedia,2)}</td><td>${fmtN(l2.tonProduzida,1)}</td>
+      <td>${fmtN(l2.kwh,0)}</td><td style="${kwhtCor2}">${fmtN(kwht2,2)}</td>
+      <td title="${l2.fonteDados||''}">${Math.round(l2.minRodando||0)}' ${l2.fonteDados==='CLP'?'<span style="color:var(--green);font-size:9px">CLP</span>':'<span style="color:var(--sub);font-size:9px">est</span>'}</td>
+      <td style="font-weight:700">${fmtN(tot.tonProduzida,1)}</td>
+      <td style="font-weight:700">${fmtN(kwhtT,2)}</td>
+      <td><button class="btn-sm" style="flex:none" onclick="abrirEditProd('${t.id}')" title="Corrigir dados deste turno">✏️</button></td>
+    </tr>`;
+  }).join('') + totRow;
+}
+
+async function carregarProducao() {
+  const mes = document.getElementById('prod-mes')?.value || new Date().toISOString().slice(0,7);
+  document.getElementById('prod-ts').textContent = 'Carregando...';
+  try {
+    const [rCorr, rMes] = await Promise.all([
+      fetch('/api/producao').then(r=>r.json()),
+      fetch(`/api/producao/mensal?mes=${mes}`).then(r=>r.json()),
+    ]);
+    renderCorrenteProd(rCorr.corrente);
+    renderGraficosProd(rMes.dias, rMes.turnos);
+    renderTabelaTurnos(rMes.turnos, rMes.totMes);
+    document.getElementById('prod-tab-title').textContent = `Turnos de ${mes.replace('-','/')} — ${rMes.turnos.length} registro(s)`;
+    document.getElementById('prod-ts').textContent = 'Atualizado: '+new Date().toLocaleTimeString('pt-BR');
+    // Cache pro botão de exportar PDF reaproveitar sem novo fetch
+    window._prodPdfCache = { mes, turnos: rMes.turnos, totMes: rMes.totMes };
+  } catch(e) {
+    document.getElementById('prod-ts').textContent = 'Erro ao carregar';
+  }
+}
+
+function exportarProducaoPDF() {
+  const cache = window._prodPdfCache;
+  if (!cache || !cache.turnos) { alert('Carregue os dados do mês antes de exportar (clique em ↺ Atualizar).'); return; }
+  const { mes, turnos, totMes } = cache;
+  const mesLabel = new Date(mes+'-01T12:00:00').toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
+
+  const doc = new jspdf.jsPDF({ orientation:'landscape', unit:'mm', format:'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+
+  doc.setFontSize(16); doc.setFont(undefined,'bold');
+  doc.text('Relatório de Produção — Moagem Cimento Gaúcho', 14, 16);
+  doc.setFontSize(11); doc.setFont(undefined,'normal');
+  doc.text(`Período: ${mesLabel}`, 14, 23);
+  doc.setFontSize(9); doc.setTextColor(120);
+  doc.text(`Gerado em ${new Date().toLocaleString('pt-BR')}`, 14, 28);
+  doc.setTextColor(0);
+
+  // Resumo do mês
+  const resumo = [
+    ['Linha 501', fmtN(totMes.ton501,1)+' t', fmtN(totMes.kwh501,0)+' kWh', fmtN(totMes.kwht501,2)+' kW/t'],
+    ['Linha 502', fmtN(totMes.ton502,1)+' t', fmtN(totMes.kwh502,0)+' kWh', fmtN(totMes.kwht502,2)+' kW/t'],
+    ['Total do mês', fmtN(totMes.tonTotal,1)+' t', '—', fmtN(totMes.kwht,2)+' kW/t'],
+  ];
+  doc.autoTable({
+    startY: 33,
+    head: [['Resumo', 'Produção', 'Energia', 'kW/t médio']],
+    body: resumo,
+    theme: 'grid',
+    headStyles: { fillColor: [33,38,45] },
+    styles: { fontSize: 9 },
+    margin: { left: 14, right: 14 },
+  });
+
+  // Tabela detalhada por turno (mesmos dados da tela)
+  const head = [['Data','Turno','501 t/h','501 ton','501 kWh','501 kW/t','501 min','502 t/h','502 ton','502 kWh','502 kW/t','502 min','Total ton','Total kW/t']];
+  const body = turnos.map(t=>{
+    const l1=t.linha501, l2=t.linha502, tot=t.total;
+    const kwht1 = l1.kwhtClpMedia ?? l1.kwht;
+    const kwht2 = l2.kwhtClpMedia ?? l2.kwht;
+    const kwhtT = (kwht1!=null&&kwht2!=null) ? ((kwht1+kwht2)/2).toFixed(2) : (kwht1 ?? kwht2 ?? '—');
+    return [
+      t.data, `${t.turno==='diurno'?'Diurno':'Noturno'}`,
+      fmtN(l1.thMedia,2), fmtN(l1.tonProduzida,1), fmtN(l1.kwh,0), fmtN(kwht1,2), Math.round(l1.minRodando||0),
+      fmtN(l2.thMedia,2), fmtN(l2.tonProduzida,1), fmtN(l2.kwh,0), fmtN(kwht2,2), Math.round(l2.minRodando||0),
+      fmtN(tot.tonProduzida,1), kwhtT,
+    ];
+  });
+  body.push([
+    { content:'TOTAL DO MÊS', colSpan:2, styles:{ fontStyle:'bold' } },
+    fmtN(totMes.th501,2), fmtN(totMes.ton501,1), fmtN(totMes.kwh501,0), fmtN(totMes.kwht501,2), Math.round(totMes.min501||0)+"'",
+    fmtN(totMes.th502,2), fmtN(totMes.ton502,1), fmtN(totMes.kwh502,0), fmtN(totMes.kwht502,2), Math.round(totMes.min502||0)+"'",
+    { content: fmtN(totMes.tonTotal,1), styles:{ fontStyle:'bold' } },
+    { content: fmtN(totMes.kwht,2), styles:{ fontStyle:'bold' } },
+  ]);
+
+  doc.autoTable({
+    startY: doc.lastAutoTable.finalY + 8,
+    head, body,
+    theme: 'striped',
+    headStyles: { fillColor: [33,38,45], fontSize: 8 },
+    styles: { fontSize: 7.5, cellPadding: 1.5 },
+    margin: { left: 14, right: 14 },
+  });
+
+  const totalPages = doc.internal.getNumberOfPages();
+  for (let i=1; i<=totalPages; i++){
+    doc.setPage(i);
+    doc.setFontSize(8); doc.setTextColor(140);
+    doc.text(`Página ${i}/${totalPages}`, pageW-14, doc.internal.pageSize.getHeight()-6, { align:'right' });
+  }
+
+  doc.save(`producao_moagem_${mes}.pdf`);
+}
+
+async function exportarBoletimPDF() {
+  const tipo    = document.getElementById('bol-tipo').value; // 'diario' | 'mensal'
+  const nominal = parseFloat(document.getElementById('ind-nominal')?.value) || 30;
+  let inicio, fim, periodoLabel, arquivoSufixo;
+
+  if (tipo === 'diario') {
+    const dataStr = document.getElementById('bol-data').value || new Date().toISOString().slice(0,10);
+    inicio = new Date(dataStr+'T00:00:00').getTime();
+    fim = Math.min(inicio + 86400000, Date.now());
+    periodoLabel = new Date(dataStr+'T12:00:00').toLocaleDateString('pt-BR', { day:'2-digit', month:'long', year:'numeric' });
+    arquivoSufixo = dataStr;
+  } else {
+    const mes = document.getElementById('prod-mes')?.value || new Date().toISOString().slice(0,7);
+    const [ano, mesNum] = mes.split('-').map(Number);
+    inicio = new Date(ano, mesNum-1, 1).getTime();
+    fim = Math.min(new Date(ano, mesNum, 1).getTime(), Date.now());
+    periodoLabel = new Date(ano, mesNum-1, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
+    arquivoSufixo = mes;
+  }
+
+  try {
+    const [r501, r502] = await Promise.all([
+      fetch(`/api/boletim/501?inicio=${inicio}&fim=${fim}&nominal=${nominal}`).then(r=>r.json()),
+      fetch(`/api/boletim/502?inicio=${inicio}&fim=${fim}&nominal=${nominal}`).then(r=>r.json()),
+    ]);
+
+    const doc = new jspdf.jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
+
+    doc.setFontSize(16); doc.setFont(undefined,'bold');
+    doc.text('Boletim de Produção — Moagem Cimento Gaúcho', 14, 16);
+    doc.setFontSize(11); doc.setFont(undefined,'normal');
+    doc.text(`${tipo==='diario'?'Boletim Diário':'Boletim Mensal'} — ${periodoLabel}`, 14, 23);
+    doc.setFontSize(9); doc.setTextColor(120);
+    doc.text(`Gerado em ${new Date().toLocaleString('pt-BR')}  ·  Produção nominal considerada: ${nominal} t/h`, 14, 28);
+    doc.setTextColor(0);
+
+    function linhaOEE(r, nomeLinha) {
+      const horasRod = r?.periodo?.horasRodando;
+      return [
+        nomeLinha,
+        fmtN(r.tonTotal,1)+' t',
+        fmtN(r.tonHMedia,2)+' t/h',
+        fmtN(r.kwhTotal,0)+' kWh',
+        fmtN(r.kwht,2)+' kW/t',
+        horasRod!=null ? fmtN(horasRod,1)+'h' : '—',
+        r.disponibilidade!=null ? r.disponibilidade+'%' : '—',
+        r.performance!=null ? r.performance+'%' : '—',
+        r.qualidade!=null ? r.qualidade+'%' : '—',
+        r.oeeCompleto!=null ? r.oeeCompleto+'%' : (r.oee!=null ? r.oee+'% (parcial)' : '—'),
+      ];
+    }
+
+    doc.autoTable({
+      startY: 34,
+      head: [['Linha','Produção','t/h médio','Energia','kW/t','Rodando','Disponib.','Performance','Qualidade','OEE']],
+      body: [ linhaOEE(r501,'501'), linhaOEE(r502,'502') ],
+      theme:'grid',
+      headStyles:{ fillColor:[33,38,45] },
+      styles:{ fontSize:8.5, halign:'center' },
+      columnStyles:{ 0:{ halign:'left', fontStyle:'bold' } },
+      margin:{ left:14, right:14 },
+    });
+
+    // Nota de cobertura de dados de qualidade (quantos dias do período tinham malha/Blaine lançados)
+    const cobertura501 = r501.qualidadeDias!=null ? `501: ${r501.qualidadeDias}/${r501.qualidadeDiasPeriodo||0} dia(s)` : '';
+    const cobertura502 = r502.qualidadeDias!=null ? `502: ${r502.qualidadeDias}/${r502.qualidadeDiasPeriodo||0} dia(s)` : '';
+    doc.setFontSize(7.5); doc.setTextColor(130);
+    doc.text(`Qualidade calculada a partir de malha/Blaine lançados no estoque-cimento-gaucho — cobertura: ${cobertura501}  ${cobertura502}`, 14, doc.lastAutoTable.finalY + 5);
+    doc.setTextColor(0);
+
+    // Malha/Blaine — diário mostra o valor de cada turno daquele dia; mensal mostra a média do período
+    let corpoQualidade, cabecalhoQualidade;
+    if (tipo === 'diario') {
+      cabecalhoQualidade = [['Linha','Turno','Receita','Malha (%)','Blaine (cm²/g)']];
+      corpoQualidade = [];
+      [[r501,'501'],[r502,'502']].forEach(([r,ln])=>{
+        const det = (r.qualidadeDetalhe||[])[0]; // só 1 dia no período diário
+        if (!det) { corpoQualidade.push([ln,'—','sem lançamento no estoque-cimento-gaucho','—','—']); return; }
+        corpoQualidade.push([ln,'Diurno', det.receitaD||'—', det.dMalha!=null?fmtN(det.dMalha,2):'—', det.dBlaine!=null?Math.round(det.dBlaine):'—']);
+        corpoQualidade.push([ln,'Noturno', det.receitaN||'—', det.nMalha!=null?fmtN(det.nMalha,2):'—', det.nBlaine!=null?Math.round(det.nBlaine):'—']);
+      });
+    } else {
+      cabecalhoQualidade = [['Linha','Malha média (%)','Blaine médio (cm²/g)','Dias com medição']];
+      corpoQualidade = [
+        ['501', r501.malhaMedia!=null?fmtN(r501.malhaMedia,2):'—', r501.blaineMedia!=null?r501.blaineMedia:'—', `${r501.qualidadeDias||0}/${r501.qualidadeDiasPeriodo||0}`],
+        ['502', r502.malhaMedia!=null?fmtN(r502.malhaMedia,2):'—', r502.blaineMedia!=null?r502.blaineMedia:'—', `${r502.qualidadeDias||0}/${r502.qualidadeDiasPeriodo||0}`],
+      ];
+    }
+
+    doc.autoTable({
+      startY: doc.lastAutoTable.finalY + 10,
+      head: cabecalhoQualidade,
+      body: corpoQualidade,
+      theme:'striped',
+      headStyles:{ fillColor:[33,38,45] },
+      styles:{ fontSize:8.5, halign:'center' },
+      columnStyles:{ 0:{ halign:'left', fontStyle:'bold' }, 2:{ halign:'left' } },
+      margin:{ left:14, right:14 },
+    });
+
+    doc.setFontSize(8); doc.setTextColor(120);
+    doc.text(
+      'OEE = Disponibilidade x Performance x Qualidade (malha/Blaine do estoque-cimento-gaucho).\n' +
+      'Quando um dia do periodo nao tem malha/Blaine lancado, a coluna Qualidade usa apenas os dias\n' +
+      'com medicao (ver cobertura acima). Se nao houver nenhum dia com medicao, o OEE exibido cai\n' +
+      'para o parcial (Disponibilidade x Performance), marcado como "(parcial)".',
+      14, doc.lastAutoTable.finalY + 8
+    );
+    doc.setTextColor(0);
+
+    doc.save(`boletim_producao_${tipo}_${arquivoSufixo}.pdf`);
+  } catch(e) {
+    alert('Erro ao gerar boletim: ' + e.message);
+  }
+}
+
+function iniciarPaginaProducao() {
+  // Preencher select de meses (últimos 3)
+  const sel = document.getElementById('prod-mes');
+  if(sel && !sel.options.length) {
+    const hoje = new Date();
+    for(let i=0;i<3;i++){
+      const d = new Date(hoje.getFullYear(), hoje.getMonth()-i, 1);
+      const val = d.toISOString().slice(0,7);
+      const lbl = d.toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+      const opt = document.createElement('option');
+      opt.value=val; opt.textContent=lbl; if(i===0)opt.selected=true;
+      sel.appendChild(opt);
+    }
+  }
+  const bolData = document.getElementById('bol-data');
+  if (bolData && !bolData.value) bolData.value = new Date().toISOString().slice(0,10);
+  carregarProducao();
+}
+
+function onBolTipoChange() {
+  const tipo = document.getElementById('bol-tipo').value;
+  document.getElementById('bol-data').style.display = tipo === 'diario' ? '' : 'none';
+}
+
+// Atualizar turno corrente via WS
+// (já chega como turno_fechado — mas para ao vivo atualiza a cada 60s se na aba)
+setInterval(()=>{
+  if(document.getElementById('page-producao')?.classList.contains('active')) carregarProducao();
+}, 60000);
+
+conectar();
+</script>
+</body>
+</html>

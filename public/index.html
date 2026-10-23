@@ -551,10 +551,11 @@ const GRUPOS = [
       { id:'ea_501bm140_tt_u04', lbl:'Mcl Mtr LA'  },
       { id:'ea_501bm140_tt_u05', lbl:'Mcl Mtr LOA' },
     ]},
-  { id:'grp_501tmnh', title:'MANCAIS MOINHO 501BM140', cols:2,
+  { id:'grp_501tmnh', title:'MANCAIS MOINHO 501BM140', cols:3,
     items:[
       { id:'ea_501bm140_tt_u06', lbl:'Mancal Mnh LA'  },
       { id:'ea_501bm140_tt_u07', lbl:'Mancal Mnh LOA' },
+      { id:'ea_501wp001_tt_u01', lbl:'Água arref.'    },
     ]},
   { id:'grp_501trafo', title:'TRAFO 501TR001', cols:3,
     items:[
@@ -599,10 +600,11 @@ const GRUPOS = [
       { id:'ea_502bm140_tt_u04', lbl:'Mcl Mtr LA'  },
       { id:'ea_502bm140_tt_u05', lbl:'Mcl Mtr LOA' },
     ]},
-  { id:'grp_502tmnh', title:'MANCAIS MOINHO 502BM140', cols:2,
+  { id:'grp_502tmnh', title:'MANCAIS MOINHO 502BM140', cols:3,
     items:[
       { id:'ea_502bm140_tt_u06', lbl:'Mancal Mnh LA'  },
       { id:'ea_502bm140_tt_u07', lbl:'Mancal Mnh LOA' },
+      { id:'ea_502wp001_tt_u01', lbl:'Água arref.'    },
     ]},
   // Gases moinho+filtro 502 unificados
   { id:'grp_502gases', title:'GASES 502BM140 / 502BF040', cols:2,
@@ -655,13 +657,11 @@ const GRUPOS = [
 function fluxoLinha(L){
   return [
     { etapa:`Moinho ${L}BM140`,        cards:[`grp_${L}motor`, `grp_${L}tmot`, `grp_${L}tmnh`, `grp_${L}redutor`,
-                                              `ea_${L}wp001_tt_u01`, `ea_${L}bm140_wt_u01`, `ea_${L}bm140_db_u01`] },
+                                              `ea_${L}bm140_wt_u01`, `ea_${L}bm140_db_u01`] },
     { etapa:'Dosagem e correia de alimentação',
                                        cards:[`grp_${L}dos`, `ea_rede_${L}wf005_c`, `ea_rede_${L}wf010_c`, `ea_rede_${L}bc035_c`] },
-    { etapa:'Elevador',                cards:[`ea_rede_${L}be060_c`] },
-    { etapa:`Separador ${L}MD070`,     cards:[`grp_${L}sep`] },
-    { etapa:'Gases / Filtro / Exaustor', cards:[`grp_${L}gases`, `ea_rede_${L}fn042_c`] },
-    { etapa:'Elevador de produto',     cards:[`ea_rede_${L}be090_c`] },
+    { etapa:'Elevadores',              cards:[`ea_rede_${L}be060_c`, `ea_rede_${L}be090_c`] },
+    { etapa:'Separador e filtro',      cards:[`grp_${L}sep`, `grp_${L}gases`, `ea_rede_${L}fn042_c`] },
     { etapa:'Utilidades',              cards:[`ea_${L}cp01_pt_u01`, `grp_${L}trafo`] },
     { etapa:'Produção', resumo:true,   cards:[`grp_${L}prod`] },
   ];

@@ -30,7 +30,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',sans-serif;fo
 @keyframes blink-rr{0%,100%{background:rgba(248,81,73,.1)}50%{background:rgba(248,81,73,.28)}}
 .banner{display:none;background:rgba(248,81,73,.1);border:1px solid var(--red);border-radius:7px;padding:9px 14px;margin-bottom:14px;color:var(--red);font-size:12px;font-weight:600;animation:blink-r 1.5s infinite}
 .banner.show{display:block}
-.fbar{margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.fbar{margin:-16px 0 14px;padding:16px 0 10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;position:sticky;top:-16px;z-index:20;background:var(--bg)}
 .fbar input,.fbar select{background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:12px;outline:none}
 .fbar input{width:240px}.fbar input:focus,.fbar select:focus{border-color:var(--blue)}
 .cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
@@ -530,10 +530,11 @@ const PARES_SKIP = new Set(Object.values(PARES));
 // Cada grupo renderiza um card único com N painéis
 const GRUPOS = [
   // ── Área 501 ──────────────────────────────────────────────────────────────
-  { id:'grp_501motor', title:'MOTOR 501BM140', cols:2,
+  { id:'grp_501motor', title:'MOTOR 501BM140', cols:3,
     items:[
       { id:'ea_501bm140_it_u01', lbl:'Corrente' },
       { id:'ea_501bm140_jt_u01', lbl:'Potência'  },
+      { id:'ea_501bm140_db_u01', lbl:'Decibelímetro' },
     ]},
   { id:'grp_501sep', title:'SEPARADOR 501MD070', cols:3,
     items:[
@@ -564,8 +565,10 @@ const GRUPOS = [
       { id:'ea_501tr001_tt_u03', lbl:'Fase C' },
     ]},
   // Gases moinho+filtro 501 unificados
-  { id:'grp_501gases', title:'GASES 501BM140 / 501BF040', cols:2,
+  { id:'grp_501gases', title:'GASES / FILTRO 501BF040 / EXAUSTOR 501FN042', cols:2,
     items:[
+      { id:'ea_rede_501fn042_c', lbl:'Exaustor · corrente'   },
+      { id:'ea_rede_501fn042_v', lbl:'Exaustor · velocidade' },
       { id:'ea_501bm140_tt_u09', lbl:'Saída Moinho' },
       { id:'ea_501bf040_tt_u01', lbl:'Entrada Filtro' },
     ]},
@@ -579,10 +582,11 @@ const GRUPOS = [
       { id:'ea_501bm140_rd_ttu04', lbl:'Eixo Saída L.O.A.'  },
     ]},
 
-  { id:'grp_502motor', title:'MOTOR 502BM140', cols:2,
+  { id:'grp_502motor', title:'MOTOR 502BM140', cols:3,
     items:[
       { id:'ea_502bm140_it_u01', lbl:'Corrente' },
       { id:'ea_502bm140_jt_u01', lbl:'Potência'  },
+      { id:'ea_502bm140_db_u01', lbl:'Decibelímetro' },
     ]},
   { id:'grp_502sep', title:'SEPARADOR 502MD070', cols:3,
     items:[
@@ -607,8 +611,10 @@ const GRUPOS = [
       { id:'ea_502wp001_tt_u01', lbl:'Água arref.'    },
     ]},
   // Gases moinho+filtro 502 unificados
-  { id:'grp_502gases', title:'GASES 502BM140 / 502BF040', cols:2,
+  { id:'grp_502gases', title:'GASES / FILTRO 502BF040 / EXAUSTOR 502FN042', cols:2,
     items:[
+      { id:'ea_rede_502fn042_c', lbl:'Exaustor · corrente'   },
+      { id:'ea_rede_502fn042_v', lbl:'Exaustor · velocidade' },
       { id:'ea_502bm140_tt_u09', lbl:'Saída Moinho'   },
       { id:'ea_502bf040_tt_u01', lbl:'Entrada Filtro' },
     ]},
@@ -637,14 +643,18 @@ const GRUPOS = [
         { virtual:'minRodando',   linha:L, lbl:'Min rodando (turno atual)', unit:'min' },
         { virtual:'tonProduzida', linha:L, lbl:'Produção (turno atual)',    unit:'t'   },
       ]},
-    { id:`grp_${L}dos`, title:`DOSADORAS ${L}WF005 / ${L}WF010`, cols:3, compacto:true, span:2,
+    { id:`grp_${L}dos`, title:`DOSADORAS ${L}WF005 / ${L}WF010`, cols:5, compacto:true, span:2,
       items:[
         { id:`th_${L}wf005`,           lbl:'WF005 · t/h atual' },
         { id:`sp_${L}wf005`,           lbl:'WF005 · setpoint'  },
         { id:`ea_${L}wf005_wt_u01`,    lbl:'WF005 · peso moega' },
+        { id:`ea_rede_${L}wf005_c`,    lbl:'WF005 · corrente'  },
+        { id:`ea_rede_${L}wf005_v`,    lbl:'WF005 · velocidade' },
         { id:`th_${L}wf010`,           lbl:'WF010 · t/h atual' },
         { id:`sp_${L}wf010`,           lbl:'WF010 · setpoint'  },
         { id:`ea_${L}wf010_wt_u01`,    lbl:'WF010 · peso moega' },
+        { id:`ea_rede_${L}wf010_c`,    lbl:'WF010 · corrente'  },
+        { id:`ea_rede_${L}wf010_v`,    lbl:'WF010 · velocidade' },
       ]},
   );
 });
@@ -657,11 +667,11 @@ const GRUPOS = [
 function fluxoLinha(L){
   return [
     { etapa:`Moinho ${L}BM140`,        cards:[`grp_${L}motor`, `grp_${L}tmot`, `grp_${L}tmnh`, `grp_${L}redutor`,
-                                              `ea_${L}bm140_wt_u01`, `ea_${L}bm140_db_u01`] },
+                                              `ea_${L}bm140_wt_u01`] },
     { etapa:'Dosagem e correia de alimentação',
-                                       cards:[`grp_${L}dos`, `ea_rede_${L}wf005_c`, `ea_rede_${L}wf010_c`, `ea_rede_${L}bc035_c`] },
+                                       cards:[`grp_${L}dos`, `ea_rede_${L}bc035_c`] },
     { etapa:'Elevadores',              cards:[`ea_rede_${L}be060_c`, `ea_rede_${L}be090_c`] },
-    { etapa:'Separador e filtro',      cards:[`grp_${L}sep`, `grp_${L}gases`, `ea_rede_${L}fn042_c`] },
+    { etapa:'Separador e filtro',      cards:[`grp_${L}sep`, `grp_${L}gases`] },
     { etapa:'Utilidades',              cards:[`ea_${L}cp01_pt_u01`, `grp_${L}trafo`] },
     { etapa:'Produção', resumo:true,   cards:[`grp_${L}prod`] },
   ];

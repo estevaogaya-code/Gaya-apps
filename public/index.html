@@ -624,19 +624,16 @@ const GRUPOS = [
 // ── Produção e dosagem por linha (cards únicos) ─────────────────────────────
 ['501','502'].forEach(L=>{
   GRUPOS.push(
-    { id:`grp_${L}prod`, title:`PRODUÇÃO MOINHO ${L}`, cols:4, compacto:true, span:2,
+    { id:`grp_${L}prod`, title:`PRODUÇÃO MOINHO ${L}`, cols:3, compacto:true, span:2,
       items:[
         { id:`totalizador_${L}`,          lbl:'T/h média'           },
         { id:`tot${L}_kwht_clp`,          lbl:'Energia média (kW/t)' },
         { id:`ea_${L}bm140_kwh_turno`,    lbl:'Energia turno'       },
         { id:`ea_${L}bm140_pot_total`,    lbl:'Potência total moagem' },
-        { id:`tot${L}_min_dia`,           lbl:'Min rodando diurno'  },
-        { id:`tot${L}_min_t2`,            lbl:'Min rodando 2º turno' },
-        { id:`tot${L}_min_total_dia`,     lbl:'Min rodando total dia' },
-        { id:`tot${L}_ton_diurno`,        lbl:'Prod. diurna'        },
-        { id:`tot${L}_prod_t2`,           lbl:'Prod. 2º turno'      },
-        { id:`tot${L}_th_t2`,             lbl:'T/h 2º turno'        },
-        { id:`tot${L}_ton_total`,         lbl:'Total alim. dia'     },
+        // Turno corrente: mesmos valores da página Dados de Produção
+        // (/api/producao), que já escolhe o totalizador certo de cada turno.
+        { virtual:'minRodando',   linha:L, lbl:'Min rodando (turno atual)', unit:'min' },
+        { virtual:'tonProduzida', linha:L, lbl:'Produção (turno atual)',    unit:'t'   },
       ]},
     { id:`grp_${L}dos`, title:`DOSADORAS ${L}WF005 / ${L}WF010`, cols:3, compacto:true, span:2,
       items:[
@@ -657,17 +654,16 @@ const GRUPOS = [
 // "Outras variáveis" no fim — nada some da tela.
 function fluxoLinha(L){
   return [
-    { etapa:'Produção', resumo:true, cards:[`grp_${L}prod`] },
-    { etapa:'Dosagem',                 cards:[`grp_${L}dos`, `ea_rede_${L}wf005_c`, `ea_rede_${L}wf010_c`] },
-    { etapa:'Correia de alimentação',  cards:[`ea_rede_${L}bc035_c`] },
     { etapa:`Moinho ${L}BM140`,        cards:[`grp_${L}motor`, `grp_${L}tmot`, `grp_${L}tmnh`, `grp_${L}redutor`,
-                                              `ea_${L}lq145a01_pt`, `ea_${L}lq145a02_pt`, `ea_${L}wp001_tt_u01`,
-                                              `ea_${L}bm140_wt_u01`, `ea_${L}bm140_db_u01`] },
+                                              `ea_${L}wp001_tt_u01`, `ea_${L}bm140_wt_u01`, `ea_${L}bm140_db_u01`] },
+    { etapa:'Dosagem e correia de alimentação',
+                                       cards:[`grp_${L}dos`, `ea_rede_${L}wf005_c`, `ea_rede_${L}wf010_c`, `ea_rede_${L}bc035_c`] },
     { etapa:'Elevador',                cards:[`ea_rede_${L}be060_c`] },
     { etapa:`Separador ${L}MD070`,     cards:[`grp_${L}sep`] },
     { etapa:'Gases / Filtro / Exaustor', cards:[`grp_${L}gases`, `ea_rede_${L}fn042_c`] },
     { etapa:'Elevador de produto',     cards:[`ea_rede_${L}be090_c`] },
     { etapa:'Utilidades',              cards:[`ea_${L}cp01_pt_u01`, `grp_${L}trafo`] },
+    { etapa:'Produção', resumo:true,   cards:[`grp_${L}prod`] },
   ];
 }
 const FLUXO = [
@@ -676,11 +672,34 @@ const FLUXO = [
   { titulo:'Expedição', etapas:[{ etapa:'Ensacadeira', cards:['ct_700rf001_sacos'] }] },
 ];
 
+// Minutos rodando e produção do turno corrente (para os itens `virtual` dos
+// cards de produção). Atualiza a cada 60 s.
+let prodCorrente={};
+async function atualizarProdCorrente(){
+  try{
+    const j=await (await fetch('/api/producao')).json();
+    const c=j&&j.corrente; if(!c) return;
+    prodCorrente={ turno:c.turno, '501':c.linha501, '502':c.linha502 };
+    ['501','502'].forEach(L=>{
+      const grp=GRUPOS.find(g=>g.id===`grp_${L}prod`);
+      const el=document.getElementById('c-'+grp.id);
+      if(el){ el.className=grupoClasse(grp); el.innerHTML=grupoHTML(grp); }
+    });
+  }catch(e){}
+}
+setTimeout(atualizarProdCorrente, 1000);
+setInterval(atualizarProdCorrente, 60000);
+
 // IDs que aparecem em algum grupo (não renderizar card individual)
 const GRUPOS_SKIP = new Set(GRUPOS.flatMap(g=>g.items.map(i=>i.id)));
 
 // IDs a ocultar completamente do dashboard
 const IDS_OCULTAR = new Set([
+  // minutos/produção de outros turnos e do dia (card de produção mostra só o turno atual)
+  ...['501','502'].flatMap(L=>[`tot${L}_min_dia`,`tot${L}_min_t2`,`tot${L}_min_total_dia`,
+    `tot${L}_ton_diurno`,`tot${L}_prod_t2`,`tot${L}_th_t2`,`tot${L}_ton_total`]),
+  // pressões das bombas de levantamento
+  'ea_501lq145a01_pt','ea_501lq145a02_pt','ea_502lq145a01_pt','ea_502lq145a02_pt',
   'ea_501bm140_pt_u02','ea_502bm140_pt_u02',   // pressão saída moinho
   'ea_501bm140_tt_u08','ea_502bm140_tt_u08',   // temp. gases ENTRADA moinho (removido)
   'ea_501bm140_tt_u09','ea_502bm140_tt_u09',   // gases saída (agora no grp_gases)
@@ -699,6 +718,16 @@ function grupoHTML(grp){
   const colsClass = cols>=5?'c5':cols===4?'c4':cols===3?'c3':'c2';
 
   const cells = grp.items.map(item=>{
+    if(item.virtual){
+      const c=prodCorrente[item.linha]; const v=c?c[item.virtual]:null;
+      const vs=v!=null?Number(v).toLocaleString('pt-BR',{maximumFractionDigits:1}):'---';
+      const turno=prodCorrente.turno?` — ${prodCorrente.turno}`:'';
+      return `<div class="gi" title="Turno atual${turno} (mesmo valor da página Dados de Produção)">
+      <div class="gl">${x(item.lbl)}${x(turno)}</div>
+      <div class="gv">${vs}</div>
+      <div class="gu">${x(item.unit)}</div>
+    </div>`;
+    }
     const cfg=tCfg[item.id]; const d=dados[item.id]||{};
     if(!cfg) return '';
     const v=d.valor??null;

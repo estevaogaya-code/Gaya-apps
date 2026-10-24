@@ -2211,6 +2211,36 @@ function turnoKey(dt, turno) {
   return `${dt.toISOString().slice(0,10)}_${turno}`;
 }
 
+// Produção do turno noturno da 501 a partir das amostras de TOTALIZADOR_501[38]
+// ("TOTAL ALIM. DIA", sem tag próprio do noturno): soma os incrementos entre
+// amostras. Antes, qualquer QUEDA era tratada como reset e somava o valor novo
+// inteiro — uma oscilação de leitura ou um degrau do CLP durante o turno (ex.:
+// [38] cair por um instante e voltar, como na troca das 18:01:57) somava de
+// novo o total do dia, e o noturno da 501 saía bem acima do real.
+// Agora cada incremento é limitado pelo que o moinho consegue produzir no
+// intervalo entre as amostras (TON_501_MAX_TH): subida/queda maior que isso é
+// salto de leitura e não conta; reset de verdade (valor volta perto de zero)
+// continua contando o pouco acumulado depois dele.
+const TON_501_MAX_TH = 80; // t/h — bem acima do máximo real da 501
+function reconstituirTonNoturno501(acum) {
+  const amostras = acum.filter(a => a.tonAcum != null);
+  if (amostras.length < 2) return null;
+  let total = 0, descartado = 0;
+  for (let i = 1; i < amostras.length; i++) {
+    const ant = amostras[i-1], atu = amostras[i];
+    const horas = Math.max(0, (atu.ts - ant.ts) / 3600000);
+    const limite = TON_501_MAX_TH * horas + 0.5;
+    const delta = atu.tonAcum >= ant.tonAcum ? atu.tonAcum - ant.tonAcum : atu.tonAcum; // queda = reset
+    if (delta <= limite) total += delta;
+    else descartado += delta;
+  }
+  const msg = descartado > 0 ? `${descartado.toFixed(1)}@${amostras[0].ts}` : null;
+  if (msg && msg !== reconstituirTonNoturno501.ultimoLog) // loga só quando muda (é chamado a cada minuto)
+    console.log(`[TURNO] 501 noturno: ${descartado.toFixed(1)} t de saltos do TOTALIZADOR_501[38] ignorados`);
+  reconstituirTonNoturno501.ultimoLog = msg;
+  return parseFloat(total.toFixed(1));
+}
+
 function dataInicioTurno(turno) {
   const agora = horaCLP().data;
   const d = new Date(agora);
@@ -2443,18 +2473,9 @@ function fecharTurnoCorrente() {
       // sistematicamente, não só às vezes. Corrigido: reconstitui somando
       // os incrementos entre as amostras já salvas do turno (mesma técnica
       // já usada pro acumulador de energia AJUSTE[13] — ver
-      // reconstituirKwhAcumulado no /api/indicadores). Quando o valor CAI
-      // de uma amostra pra outra (reset detectado), soma o valor novo
-      // inteiro, que já é o total acumulado desde o reset.
-      const amostrasTon = turnoCorrente.acum501.map(a => a.tonAcum).filter(v => v != null);
-      if (amostrasTon.length < 2) return null;
-      let total = 0;
-      for (let i = 1; i < amostrasTon.length; i++) {
-        total += amostrasTon[i] >= amostrasTon[i-1]
-          ? (amostrasTon[i] - amostrasTon[i-1])
-          : amostrasTon[i];
-      }
-      return parseFloat(total.toFixed(1));
+      // reconstituirKwhAcumulado no /api/indicadores), com limite de taxa
+      // contra saltos de leitura — ver reconstituirTonNoturno501.
+      return reconstituirTonNoturno501(turnoCorrente.acum501);
     })(),
     th:  null,
     // TOTALIZADOR_501[87] é um delta calculado DENTRO do próprio CLP
@@ -2648,15 +2669,7 @@ app.get('/api/producao', (req, res) => {
     // ver comentário completo em fecharTurnoCorrente), em vez de fim-ini
     // (que falhava sistematicamente sempre que o reset caía no meio do turno).
     ton: (() => {
-      const amostrasTon = turnoCorrente.acum501.map(a => a.tonAcum).filter(v => v != null);
-      if (amostrasTon.length < 2) return null;
-      let total = 0;
-      for (let i = 1; i < amostrasTon.length; i++) {
-        total += amostrasTon[i] >= amostrasTon[i-1]
-          ? (amostrasTon[i] - amostrasTon[i-1])
-          : amostrasTon[i];
-      }
-      return parseFloat(total.toFixed(1));
+      return reconstituirTonNoturno501(turnoCorrente.acum501);
     })(),
     th: null,
     // [87] é confiável (delta calculado no próprio CLP), atualiza minuto a

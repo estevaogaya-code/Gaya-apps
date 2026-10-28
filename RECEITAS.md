@@ -43,6 +43,49 @@ node --test test/receitas.test.js
   Por isso o servidor recusa "forçar" quando `n` muda e `COUNTER_MR_RECEITAS_L[0].ACC > novo n`
   (ou quando não consegue ler o ACC).
 
+## Comandos: Grupo 5 e parada do moinho (28/10/2026)
+
+Tela `public/mobile-comandos.html` (botão "⚙️ Comandos" no mobile-status). Mesmo PIN, mesma
+rede confiável e mesmo log (`receitas_log.jsonl`, rotas `grupo5` e `parar_moinho`) das receitas.
+Tudo pela fila do `receitas.js` — o `server.js` não mudou.
+
+| Rota | O quê |
+|---|---|
+| `GET /api/comandos/:linha` | estado: `GRP50xGR05`, `GRP50xGR08.16`, `M50xBM140.6`, `M50xBM141.6` e as 9 bombas do grupo |
+| `POST /api/comandos/:linha/grupo5` | `{usuario, acao:'ligar'|'desligar', confirmaSeguranca:true}` (PIN) |
+| `POST /api/comandos/:linha/parar-moinho` | `{usuario, confirmacao:'PARAR'}` (PIN) |
+
+**Grupo 5** (`GRP50xGR05`, rotinas `GR5_50x_SELECT_DEPT` do L5K): LQ071A01, LQ145A01/A02,
+LQ146A01, LQ147A01, LQ150A01, WP001–WP003.
+- **Ligar** = escreve `.15 = 1` (o ladder mantém enquanto `.17` selecionado e os intertravamentos
+  `.0/.1/.2/.3/.5` estão OK). O servidor recusa se: já ligado, `.16` ativo, não selecionado (`.17`),
+  em LOCAL (`.18`) ou intertravamento `.0/.1/.3` ativo. Exige a confirmação "sem pessoas expostas /
+  equipamento bloqueado". Se o ladder não mantiver o `.15`, responde `recusado_clp`.
+- **Desligar** = `.15 = 0` e `.16 = 1` (o ladder mantém o `.16` até o retorno `.6` cair).
+  **Recusado com o moinho (`M50xBM140.6`) ou o BM141 (`M50xBM141.6`) rodando** — o desliga do
+  ladder não confere isso.
+- O CLP desliga o grupo sozinho 20 h depois do moinho e do BM141 pararem (`TIMER_OFF_GRP5`).
+
+**Parar moinho** = pulso em `GRP50xGR08.16` ("DESLIGA GRUPO 8": selo XIC/OTE, só a IHM zera):
+no rung "COMANDO DESLIGA VIA SUPERVISORIO" do `50xBM140` dá OTU no comando do motor. O servidor
+liga, espera 1 s, desliga (3 tentativas) e relê. Só aceito com o moinho rodando e confirmação
+"PARAR". **Não é parada de emergência de segurança** (não substitui botão de emergência/corda) e
+**não religa** o moinho — religar só pelo supervisório.
+
+### Bancada — comandos (com a manutenção avisada)
+
+1. Leitura: `curl -s localhost:3000/api/comandos/501` e conferir com o supervisório: grupo ligado/
+   desligado, selecionado, local/remoto, moinho, BM141 e as 9 bombas.
+2. Moinho parado, Grupo 5 desligado, selecionado e em remoto: **Ligar** pela tela. Conferir no
+   RSLogix `GRP501GR05.15` = 1 e as bombas partindo em sequência.
+3. Com o moinho parado: **Desligar**. Conferir `GRP501GR05.16` = 1 até o grupo parar e depois 0,
+   e `.15` = 0. Conferir que o grupo **não** volta a partir sozinho.
+4. Com o moinho rodando, tentar **Desligar**: tem de recusar (`moinho_rodando`) sem escrever nada.
+5. Parar moinho: numa parada programada, com o moinho rodando sem carga e a operação avisada,
+   usar **PARAR MOINHO**. Conferir que o moinho para, que `GRP501GR08.16` volta a 0 e que o moinho
+   religa normalmente pelo supervisório. Se a IHM usar outro bit para o "desliga", me avise.
+6. Conferir as entradas em `receitas_log.jsonl`.
+
 ## Peso desejado e resets (14/10/2026)
 
 - **Peso desejado na moega** = `PERCENTUAL_RECEITA_L[10]` (base do lote, kg). Campo na tela,

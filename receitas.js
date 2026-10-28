@@ -50,6 +50,27 @@ const NOME_MAX = 12;         // caracteres — o que o supervisório exibe
 const STRING_DATA_MAX = 82;  // tamanho do DATA do STRING padrão Logix
 const SINT = 0xC2, DINT = 0xC4; // códigos CIP, para criar tags sem leitura prévia
 
+// ── Comandos: Grupo 5 (bombas hidráulicas) e parada do moinho ────────────────
+// Conferido no L5K (rotinas GR5_50x_SELECT_DEPT, GR8_SELECT_DEPT/GR8_50xBM140):
+//   GRP50xGR05 (DINT) .0/.1/.3/.4 intertravamentos, .5 pronto (= .17), .6 retorno
+//     de ligado do grupo, .15 LIGA (o ladder mantém enquanto .17 e os
+//     intertravamentos estiverem OK), .16 DESLIGA (mantido até .6 cair),
+//     .17 grupo selecionado (supervisório), .18 modo local.
+//     O DESLIGA do ladder NÃO confere se o moinho parou — a regra está aqui.
+//     O CLP desliga o grupo sozinho 20 h depois do moinho e do BM141 pararem.
+//   GRP50xGR08.16 "DESLIGA GRUPO 8" (selo XIC/OTE, ninguém zera no ladder):
+//     no rung "COMANDO DESLIGA VIA SUPERVISORIO" do 50xBM140 dá OTU no comando
+//     do motor. Aqui: pulso (liga, espera, desliga). Religar só pelo supervisório.
+const GR5_BITS = { protecao: 0, seguranca: 1, maquina: 3, partida: 4, pronto: 5, ligado: 6, liga: 15, desliga: 16, selecionado: 17, local: 18 };
+const BOMBAS_GR5 = ['LQ071A01', 'LQ145A01', 'LQ145A02', 'LQ146A01', 'LQ147A01', 'LQ150A01', 'WP001', 'WP002', 'WP003'];
+function tagsComandos(L) {
+  return {
+    gr5: `GRP${L}GR05`, gr8: `GRP${L}GR08`, moinho: `M${L}BM140`, bm141: `M${L}BM141`,
+    bombas: BOMBAS_GR5.map(c => ({ codigo: `${L}${c}`, tag: `M${L}${c}` })),
+  };
+}
+const bitDe = (v, b) => ((Number(v) | 0) & (1 << b)) !== 0;
+
 // ─── Funções puras ────────────────────────────────────────────────────────────
 
 function tagsDaLinha(L) {
@@ -647,6 +668,107 @@ function criarReceitas(opts) {
     throw erroHttp(502, 'falha_escrita', { erroEscrita: erroLigar, mensagem: `${rotulo} não foi aceito pelo CLP (bit voltou a desligado).` });
   }
 
+  // ── Comandos (rodam dentro da fila) ─────────────────────────────────────────
+  async function lerComandos(PLC, L) {
+    const t = tagsComandos(L);
+    const gr5 = Number((await lerTag(PLC, t.gr5)).value);
+    const gr8 = Number((await lerTag(PLC, t.gr8)).value);
+    const moinho = Number((await lerTag(PLC, t.moinho)).value);
+    const bm141 = Number((await lerTag(PLC, t.bm141)).value);
+    const bombas = [];
+    for (const b of t.bombas) {
+      const v = Number((await lerTag(PLC, b.tag)).value);
+      bombas.push({ codigo: b.codigo, ligado: bitDe(v, 6) || bitDe(v, 7), falha: !bitDe(v, 8) });
+    }
+    const g = {};
+    for (const [k, b] of Object.entries(GR5_BITS)) g[k] = bitDe(gr5, b);
+    return { linha: L, grupo5: g, moinhoRodando: bitDe(moinho, 6), bm141Rodando: bitDe(bm141, 6), paradaMoinhoAtiva: bitDe(gr8, 16), bombas };
+  }
+
+  const erroDeCip = e => (e && e.generalStatusCode != null) ? `CIP status ${e.generalStatusCode}` : ((e && e.message) || String(e));
+  async function escreverBit(PLC, nome, valor) {
+    const tag = await lerTag(PLC, nome);
+    tag.value = !!valor;
+    await PLC.writeTag(tag);
+  }
+
+  async function executarGrupo5(PLC, job, { L, acao, usuario, ip }) {
+    const t = tagsComandos(L);
+    const log = { ip, usuario, linha: L, rota: 'grupo5', acao };
+    let est;
+    try { est = await lerComandos(PLC, L); }
+    catch (e) { registrarLog({ ...log, resultado: 'falha_leitura' }); throw e; }
+    const g = est.grupo5;
+    log.antes = { grupo5: g, moinhoRodando: est.moinhoRodando, bm141Rodando: est.bm141Rodando };
+    const recusar = (erro, mensagem) => { registrarLog({ ...log, resultado: erro }); throw erroHttp(409, erro, { mensagem, estado: est }); };
+
+    if (acao === 'ligar') {
+      if (g.ligado) recusar('ja_ligado', `O Grupo 5 da linha ${L} já está ligado.`);
+      if (g.desliga) recusar('desligando', 'O Grupo 5 está recebendo comando de desligar — aguarde parar.');
+      if (!g.selecionado) recusar('nao_selecionado', 'O Grupo 5 não está selecionado no supervisório. Selecione o grupo lá antes.');
+      if (g.local) recusar('modo_local', 'O Grupo 5 está em LOCAL — partida remota bloqueada.');
+      const faltam = ['protecao', 'seguranca', 'maquina'].filter(k => !g[k]);
+      if (faltam.length) recusar('intertravamento', `Intertravamento ativo no Grupo 5: ${faltam.join(', ')}. Confira no supervisório.`);
+    } else {
+      if (est.moinhoRodando || est.bm141Rodando)
+        recusar('moinho_rodando', `Moinho ${L} (${est.moinhoRodando ? 'BM140' : 'BM141'}) está rodando — desligar as bombas hidráulicas agora danificaria os mancais. Pare o moinho primeiro.`);
+      if (!g.ligado && !g.liga && !est.bombas.some(b => b.ligado)) recusar('ja_desligado', `O Grupo 5 da linha ${L} já está desligado.`);
+    }
+    if (job.cancelado) { registrarLog({ ...log, resultado: 'timeout_nao_executado' }); throw erroHttp(504, 'timeout', { executado: false, mensagem: 'Tempo esgotado — o comando não foi enviado.' }); }
+
+    let erroEscrita = null;
+    job.escritaEnviada = true;
+    try {
+      if (acao === 'ligar') await escreverBit(PLC, `${t.gr5}.${GR5_BITS.liga}`, true);
+      else { await escreverBit(PLC, `${t.gr5}.${GR5_BITS.liga}`, false); await escreverBit(PLC, `${t.gr5}.${GR5_BITS.desliga}`, true); }
+    } catch (e) { erroEscrita = erroDeCip(e); }
+    await sleep(pausaReleituraMs);
+    let depois = null;
+    try { depois = await lerComandos(PLC, L); } catch (_) {}
+    let resultado = erroEscrita ? 'falha_escrita' : 'ok';
+    // Ligar: o ladder só mantém o .15 se os intertravamentos permitirem
+    if (!erroEscrita && acao === 'ligar' && depois && !depois.grupo5.liga && !depois.grupo5.ligado) resultado = 'recusado_clp';
+    registrarLog({ ...log, resultado, erroEscrita, depois: depois ? { grupo5: depois.grupo5, bombas: depois.bombas } : null });
+    if (resultado === 'ok') return { ok: true, linha: L, acao, estado: depois,
+      mensagem: acao === 'ligar' ? `Comando LIGAR enviado ao Grupo 5 da linha ${L}. As bombas partem em sequência.` : `Comando DESLIGAR enviado ao Grupo 5 da linha ${L}.` };
+    if (resultado === 'recusado_clp') throw erroHttp(409, 'recusado_clp', { estado: depois, mensagem: 'O CLP não manteve o comando de ligar (intertravamento). Confira no supervisório.' });
+    throw erroHttp(502, 'falha_escrita', { erroEscrita, estado: depois, mensagem: 'O CLP não aceitou o comando. Confira no supervisório.' });
+  }
+
+  async function executarPararMoinho(PLC, job, { L, usuario, ip }) {
+    const nome = `${tagsComandos(L).gr8}.16`;
+    const log = { ip, usuario, linha: L, rota: 'parar_moinho' };
+    let est;
+    try { est = await lerComandos(PLC, L); }
+    catch (e) { registrarLog({ ...log, resultado: 'falha_leitura' }); throw e; }
+    log.antes = { moinhoRodando: est.moinhoRodando, paradaMoinhoAtiva: est.paradaMoinhoAtiva };
+    if (!est.moinhoRodando) { registrarLog({ ...log, resultado: 'moinho_parado' }); throw erroHttp(409, 'moinho_parado', { estado: est, mensagem: `O moinho ${L} já está parado.` }); }
+    if (est.paradaMoinhoAtiva) { registrarLog({ ...log, resultado: 'bit_ja_ligado' }); throw erroHttp(409, 'bit_ja_ligado', { estado: est, mensagem: `O comando de desligar (${nome}) já está ativo pelo supervisório.` }); }
+    if (job.cancelado) { registrarLog({ ...log, resultado: 'timeout_nao_executado' }); throw erroHttp(504, 'timeout', { executado: false, mensagem: 'Tempo esgotado — o comando não foi enviado.' }); }
+
+    let erroLigar = null, erroDesligar = null, desligado = false;
+    job.escritaEnviada = true;
+    try { await escreverBit(PLC, nome, true); } catch (e) { erroLigar = erroDeCip(e); }
+    await sleep(pulsoMs);
+    for (let tent = 0; tent < 3 && !desligado; tent++) {
+      try {
+        await escreverBit(PLC, nome, false);
+        await sleep(pausaReleituraMs);
+        desligado = !(await lerTag(PLC, nome)).value;
+        if (!desligado) erroDesligar = 'releitura mostra o bit ainda ligado';
+      } catch (e) { erroDesligar = erroDeCip(e); }
+    }
+    let depois = null;
+    try { depois = await lerComandos(PLC, L); } catch (_) {}
+    const resultado = !desligado ? 'bit_preso' : erroLigar ? 'falha_escrita' : 'ok';
+    registrarLog({ ...log, resultado, erroLigar, erroDesligar: desligado ? null : erroDesligar, depois: depois ? { moinhoRodando: depois.moinhoRodando } : null });
+    if (resultado === 'ok') return { ok: true, linha: L, estado: depois,
+      mensagem: depois && !depois.moinhoRodando ? `Moinho ${L} parado.` : `Comando de parada enviado ao moinho ${L}. Confirme a parada no supervisório.` };
+    if (resultado === 'bit_preso') throw erroHttp(502, 'bit_preso', { erroDesligar, estado: depois,
+      mensagem: `ATENÇÃO: ${nome} pode ter ficado LIGADO — com ele ligado o moinho não parte. Desligue pelo supervisório.` });
+    throw erroHttp(502, 'falha_escrita', { erroEscrita: erroLigar, estado: depois, mensagem: 'O CLP não aceitou o comando de parada. PARE O MOINHO PELO SUPERVISÓRIO OU NO LOCAL.' });
+  }
+
   // ── Rotas ──────────────────────────────────────────────────────────────────
   const router = express.Router();
 
@@ -758,6 +880,47 @@ function criarReceitas(opts) {
     }
   });
 
+  // ── Rotas de comandos ──────────────────────────────────────────────────────
+  router.get('/api/comandos/:linha', async (req, res) => {
+    const L = req.params.linha;
+    if (!validarLinha(L)) return res.status(400).json({ ok: false, erro: 'linha_invalida', mensagem: 'Linha deve ser 501 ou 502.' });
+    try { res.json({ ok: true, ts: agora(), escritaHabilitada: !!pinEsperado(), estado: await enfileirar(`comandos ler ${L}`, PLC => lerComandos(PLC, L)) }); }
+    catch (e) { responderErro(res, e); }
+  });
+
+  function rotaComando(rota, validar, executar) {
+    return async (req, res) => {
+      const L = req.params.linha;
+      if (!validarLinha(L)) return res.status(400).json({ ok: false, erro: 'linha_invalida', mensagem: 'Linha deve ser 501 ou 502.' });
+      const b = req.body || {};
+      const usuario = typeof b.usuario === 'string' ? b.usuario.trim() : '';
+      if (!usuario || usuario.length > 60) return res.status(400).json({ ok: false, erro: 'usuario_obrigatorio', mensagem: 'Informe o operador (até 60 caracteres).' });
+      const invalido = validar(b);
+      if (invalido) return res.status(400).json({ ok: false, ...invalido });
+      const ip = ipDe(req);
+      try { res.json(await enfileirar(`${rota} ${L}`, (PLC, job) => executar(PLC, job, { L, usuario, ip, b }))); }
+      catch (e) {
+        const c = e && e.corpo;
+        if (c && (c.erro === 'clp_offline' || (c.erro === 'timeout' && c.etapa === 'fila')))
+          registrarLog({ ip, usuario, linha: L, rota, acao: b.acao, resultado: c.erro === 'clp_offline' ? 'clp_offline' : 'timeout_nao_executado' });
+        responderErro(res, e);
+      }
+    };
+  }
+
+  router.post('/api/comandos/:linha/grupo5', registrarChegada, ...protegido, rotaComando('grupo5',
+    b => {
+      if (b.acao !== 'ligar' && b.acao !== 'desligar') return { erro: 'acao_invalida', mensagem: 'acao deve ser "ligar" ou "desligar".' };
+      if (b.acao === 'ligar' && b.confirmaSeguranca !== true)
+        return { erro: 'confirmacao_obrigatoria', mensagem: 'Confirme que não há pessoas expostas e que o equipamento em manutenção está bloqueado.' };
+      return null;
+    },
+    (PLC, job, o) => executarGrupo5(PLC, job, { ...o, acao: o.b.acao })));
+
+  router.post('/api/comandos/:linha/parar-moinho', registrarChegada, ...protegido, rotaComando('parar_moinho',
+    b => (b.confirmacao === 'PARAR' ? null : { erro: 'confirmacao_obrigatoria', mensagem: 'Digite PARAR para confirmar.' }),
+    (PLC, job, o) => executarPararMoinho(PLC, job, o)));
+
   router.post('/api/receitas/:linha', registrarChegada, ...protegido, async (req, res) => {
     const L = req.params.linha;
     if (!validarLinha(L)) return res.status(400).json({ ok: false, erro: 'linha_invalida', mensagem: 'Linha deve ser 501 ou 502.' });
@@ -823,3 +986,4 @@ module.exports.tagsDaLinha = tagsDaLinha;
 module.exports.validarUmidade = validarUmidade;
 module.exports.normalizarNome = normalizarNome;
 module.exports.validarPeso = validarPeso;
+module.exports.tagsComandos = tagsComandos;

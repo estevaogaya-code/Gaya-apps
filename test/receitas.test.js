@@ -786,3 +786,121 @@ test('reset: se não conseguir desligar o bit, tenta 3 vezes e avisa bit_preso',
     assert.equal(t.log().pop().resultado, 'bit_preso');
   } finally { await t.fechar(); }
 });
+
+// ─── Comandos: Grupo 5 e parada do moinho ─────────────────────────────────────
+const B = n => 1 << n;
+function memComandos(plc, L, o = {}) {
+  // grupo selecionado (.17), pronto (.5), intertravamentos .0/.1/.2/.3 OK, remoto
+  plc.mem[`GRP${L}GR05`] = o.gr5 != null ? o.gr5 : (B(0) | B(1) | B(2) | B(3) | B(5) | B(17));
+  plc.mem[`GRP${L}GR08`] = 0;
+  plc.mem[`M${L}BM140`] = o.moinho ? (B(6) | B(8)) : B(8);
+  plc.mem[`M${L}BM141`] = o.bm141 ? B(6) : 0;
+  for (const c of ['LQ071A01', 'LQ145A01', 'LQ145A02', 'LQ146A01', 'LQ147A01', 'LQ150A01', 'WP001', 'WP002', 'WP003'])
+    plc.mem[`M${L}${c}`] = B(8) | (o.bombas ? B(6) : 0);
+}
+const bitsEscritos = plc => (plc.bits || []).map(([n, v]) => `${n}=${v ? 1 : 0}`);
+
+test('comandos: leitura do estado', async () => {
+  const m = await montar();
+  try {
+    memComandos(m.plc, '501', { moinho: true, bombas: true, gr5: B(6) | B(15) | B(17) | B(5) });
+    const r = await m.req('GET', '/api/comandos/501', null, null);
+    assert.equal(r.status, 200);
+    assert.equal(r.corpo.estado.moinhoRodando, true);
+    assert.equal(r.corpo.estado.grupo5.ligado, true);
+    assert.equal(r.corpo.estado.grupo5.selecionado, true);
+    assert.equal(r.corpo.estado.bombas.length, 9);
+    assert.equal(r.corpo.estado.bombas[0].codigo, '501LQ071A01');
+    assert.equal(r.corpo.estado.bombas[0].ligado, true);
+  } finally { await m.fechar(); }
+});
+
+test('comandos: ligar Grupo 5 — validações e sucesso', async () => {
+  const m = await montar();
+  try {
+    memComandos(m.plc, '501');
+    let r = await m.req('POST', '/api/comandos/501/grupo5', { usuario: 'T', acao: 'ligar' });
+    assert.equal(r.status, 400); assert.equal(r.corpo.erro, 'confirmacao_obrigatoria');
+    r = await m.req('POST', '/api/comandos/501/grupo5', { usuario: 'T', acao: 'ligar', confirmaSeguranca: true }, '0000');
+    assert.equal(r.status, 401);
+
+    m.plc.mem.GRP501GR05 &= ~B(17); // não selecionado
+    r = await m.req('POST', '/api/comandos/501/grupo5', { usuario: 'T', acao: 'ligar', confirmaSeguranca: true });
+    assert.equal(r.status, 409); assert.equal(r.corpo.erro, 'nao_selecionado');
+    m.plc.mem.GRP501GR05 |= B(17) | B(18); // local
+    r = await m.req('POST', '/api/comandos/501/grupo5', { usuario: 'T', acao: 'ligar', confirmaSeguranca: true });
+    assert.equal(r.status, 409); assert.equal(r.corpo.erro, 'modo_local');
+    m.plc.mem.GRP501GR05 &= ~(B(18) | B(1)); // intertravamento de segurança
+    r = await m.req('POST', '/api/comandos/501/grupo5', { usuario: 'T', acao: 'ligar', confirmaSeguranca: true });
+    assert.equal(r.status, 409); assert.equal(r.corpo.erro, 'intertravamento');
+    assert.deepEqual(bitsEscritos(m.plc), []); // nada escrito até aqui
+
+    m.plc.mem.GRP501GR05 |= B(1);
+    r = await m.req('POST', '/api/comandos/501/grupo5', { usuario: 'T', acao: 'ligar', confirmaSeguranca: true });
+    assert.equal(r.status, 200, JSON.stringify(r.corpo));
+    assert.deepEqual(bitsEscritos(m.plc), ['GRP501GR05.15=1']);
+    assert.ok(m.plc.mem.GRP501GR05 & B(15));
+    await m.r._aguardarArquivos();
+    assert.equal(m.log().filter(l => l.rota === 'grupo5').pop().resultado, 'ok');
+  } finally { await m.fechar(); }
+});
+
+test('comandos: ligar recusado pelo CLP (ladder não mantém o .15)', async () => {
+  const m = await montar();
+  try {
+    memComandos(m.plc, '502');
+    const w = m.plc.writeTag.bind(m.plc);
+    m.plc.writeTag = async t => { await w(t); if (t.name === 'GRP502GR05.15') m.plc.mem.GRP502GR05 &= ~B(15); };
+    const r = await m.req('POST', '/api/comandos/502/grupo5', { usuario: 'T', acao: 'ligar', confirmaSeguranca: true });
+    assert.equal(r.status, 409); assert.equal(r.corpo.erro, 'recusado_clp');
+  } finally { await m.fechar(); }
+});
+
+test('comandos: desligar Grupo 5 bloqueado com moinho ou BM141 rodando', async () => {
+  const m = await montar();
+  try {
+    memComandos(m.plc, '501', { moinho: true, bombas: true, gr5: B(6) | B(15) | B(17) | B(5) });
+    let r = await m.req('POST', '/api/comandos/501/grupo5', { usuario: 'T', acao: 'desligar' });
+    assert.equal(r.status, 409); assert.equal(r.corpo.erro, 'moinho_rodando');
+    memComandos(m.plc, '501', { bm141: true, bombas: true, gr5: B(6) | B(15) | B(17) | B(5) });
+    r = await m.req('POST', '/api/comandos/501/grupo5', { usuario: 'T', acao: 'desligar' });
+    assert.equal(r.status, 409); assert.equal(r.corpo.erro, 'moinho_rodando');
+    assert.deepEqual(bitsEscritos(m.plc), []);
+
+    memComandos(m.plc, '501', { bombas: true, gr5: B(6) | B(15) | B(17) | B(5) });
+    r = await m.req('POST', '/api/comandos/501/grupo5', { usuario: 'T', acao: 'desligar' });
+    assert.equal(r.status, 200, JSON.stringify(r.corpo));
+    assert.deepEqual(bitsEscritos(m.plc), ['GRP501GR05.15=0', 'GRP501GR05.16=1']);
+  } finally { await m.fechar(); }
+});
+
+test('comandos: parar moinho — confirmação, moinho parado e pulso', async () => {
+  const m = await montar();
+  try {
+    memComandos(m.plc, '501');
+    let r = await m.req('POST', '/api/comandos/501/parar-moinho', { usuario: 'T' });
+    assert.equal(r.status, 400); assert.equal(r.corpo.erro, 'confirmacao_obrigatoria');
+    r = await m.req('POST', '/api/comandos/501/parar-moinho', { usuario: 'T', confirmacao: 'PARAR' });
+    assert.equal(r.status, 409); assert.equal(r.corpo.erro, 'moinho_parado');
+
+    memComandos(m.plc, '501', { moinho: true });
+    const w = m.plc.writeTag.bind(m.plc);
+    // ladder: GR08.16 ligado => OTU no motor (retorno .6 cai)
+    m.plc.writeTag = async t => { await w(t); if (t.name === 'GRP501GR08.16' && t.value) m.plc.mem.M501BM140 &= ~B(6); };
+    r = await m.req('POST', '/api/comandos/501/parar-moinho', { usuario: 'T', confirmacao: 'PARAR' });
+    assert.equal(r.status, 200, JSON.stringify(r.corpo));
+    assert.deepEqual(bitsEscritos(m.plc), ['GRP501GR08.16=1', 'GRP501GR08.16=0']);
+    assert.equal(m.plc.mem.GRP501GR08 & B(16), 0);
+    assert.equal(r.corpo.estado.moinhoRodando, false);
+  } finally { await m.fechar(); }
+});
+
+test('comandos: parar moinho — bit preso é avisado', async () => {
+  const m = await montar();
+  try {
+    memComandos(m.plc, '502', { moinho: true });
+    m.plc.falharBit = t => t.name === 'GRP502GR08.16' && !t.value;
+    const r = await m.req('POST', '/api/comandos/502/parar-moinho', { usuario: 'T', confirmacao: 'PARAR' });
+    assert.equal(r.status, 502); assert.equal(r.corpo.erro, 'bit_preso');
+  } finally { await m.fechar(); }
+});

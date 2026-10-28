@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Comandos Moinhos</title>
+<!--
+  ═══════════════════════════════════════════════════════════════════════════
+  TELA MOBILE — COMANDOS (escreve no CLP via server.js -> receitas.js)
+  ═══════════════════════════════════════════════════════════════════════════
+    GET  /api/comandos/:linha               estado do Grupo 5, moinho e bombas
+    POST /api/comandos/:linha/grupo5        { acao: ligar|desligar } (PIN)
+    POST /api/comandos/:linha/parar-moinho  { confirmacao: 'PARAR' }  (PIN)
+  Regras (no servidor): ligar só com o grupo selecionado, em REMOTO e sem
+  intertravamento; desligar só com o moinho (BM140) e o BM141 parados.
+  Parar o moinho NÃO é parada de emergência de segurança (não substitui botão
+  de emergência/corda): é o mesmo "desliga" do supervisório. Religar o moinho
+  só pelo supervisório. Mesmo PIN e mesmo log da tela de receitas.
+  ═══════════════════════════════════════════════════════════════════════════
+-->
+<style>
+  :root{
+    --bg:#0b1220; --card:#131c2e; --card-b:#1f2c44; --txt:#e6edf6; --txt-dim:#8493ab;
+    --ok:#22c55e; --off:#4b5568; --bad:#ef4444; --warn:#f59e0b; --accent:#3b82f6;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    -webkit-tap-highlight-color:transparent;
+  }
+  button{font-family:inherit;}
+  #lock-screen{
+    position:fixed; inset:0; z-index:100; background:var(--bg);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:24px; gap:14px; text-align:center;
+  }
+  #lock-screen.hidden{display:none;}
+  #lock-screen .lock-icon{font-size:34px;}
+  #lock-screen h1{font-size:16px; margin:0; font-weight:700;}
+  #lock-screen p{font-size:12px; color:var(--txt-dim); margin:0; max-width:300px;}
+  #lock-form{display:flex; flex-direction:column; gap:10px; width:100%; max-width:260px; margin-top:8px;}
+  .inp{
+    background:var(--card); border:1px solid var(--card-b); color:var(--txt);
+    padding:12px 14px; border-radius:10px; font-size:16px; outline:none; width:100%;
+  }
+  .inp:focus{border-color:var(--accent);}
+  #lock-form .inp{text-align:center;}
+  .btn{
+    background:var(--accent); color:#fff; border:none; padding:12px 14px;
+    border-radius:10px; font-size:14px; font-weight:700; cursor:pointer;
+  }
+  .btn:disabled{background:var(--off); color:var(--txt-dim); cursor:not-allowed;}
+  .btn.sec{background:var(--card); color:var(--txt); border:1px solid var(--card-b);}
+  .btn.danger{background:var(--bad);}
+  .btn.sm{padding:7px 10px; font-size:12px; border-radius:8px;}
+  #lock-error{color:var(--bad); font-size:12px; min-height:16px;}
+  #app-content.locked{display:none;}
+
+  header{
+    position:sticky; top:0; z-index:10; background:#0b1220ee; backdrop-filter:blur(6px);
+    padding:12px 14px; border-bottom:1px solid var(--card-b);
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+  }
+  header h1{font-size:15px; margin:0; font-weight:600; letter-spacing:.3px;}
+  header h1 span{color:var(--txt-dim); font-weight:400; font-size:12px; display:block; margin-top:2px;}
+  .hist-btn{
+    background:var(--card); color:var(--txt); border:1px solid var(--card-b);
+    padding:6px 10px; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; white-space:nowrap; text-decoration:none;
+  }
+  #conn{font-size:11px; padding:4px 9px; border-radius:20px; font-weight:600; display:flex; align-items:center; gap:5px; white-space:nowrap;}
+  #conn .dot{width:7px;height:7px;border-radius:50%;}
+  .conn-ok{background:#0f2e1c; color:var(--ok);} .conn-ok .dot{background:var(--ok);}
+  .conn-bad{background:#2e1414; color:var(--bad);} .conn-bad .dot{background:var(--bad); animation:pulse 1s infinite;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+  .tabs{display:flex; gap:6px; padding:10px 14px 0;}
+  .tab{
+    flex:1; text-align:center; padding:9px 0; border-radius:10px; font-size:13px; font-weight:600;
+    background:var(--card); color:var(--txt-dim); border:1px solid var(--card-b); cursor:pointer;
+  }
+  .tab.active{background:var(--accent); color:#fff; border-color:var(--accent);}
+
+  main{padding:12px 14px 60px; max-width:640px; margin:0 auto;}
+  .section-title{font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--txt-dim); margin:18px 2px 8px; font-weight:700;}
+  .card{background:var(--card); border:1px solid var(--card-b); border-radius:14px; padding:12px 14px;}
+  .pills{display:flex; flex-wrap:wrap; gap:6px;}
+  .pill{font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; display:inline-flex; align-items:center; gap:4px;}
+  .pill-on{background:#0f2e1c; color:var(--ok);}
+  .pill-off{background:#1a2233; color:var(--txt-dim);}
+  .pill-bad{background:#2e1414; color:var(--bad);}
+  .pill-warn{background:#332405; color:var(--warn);}
+
+  .comp{display:grid; grid-template-columns:1fr 78px 72px; gap:6px; align-items:center; padding:8px 0; border-top:1px dashed var(--card-b);}
+  .comp.cab{padding:0 0 4px; border-top:none; font-size:10.5px; color:var(--txt-dim); text-transform:uppercase; letter-spacing:.4px; font-weight:700;}
+  .comp.cab span{text-align:right;}
+  .comp .nome{font-size:13.5px; font-weight:600; min-width:0; overflow-wrap:anywhere;}
+  .comp .nome small{display:block; font-size:11px; color:var(--txt-dim); font-weight:400; margin-top:2px;}
+  .comp .inp{padding:9px 8px; text-align:right; font-weight:700;}
+  .comp .inp.mudou{border-color:var(--warn);}
+  .comp .inp.erro{border-color:var(--bad);}
+  .comp.inativo .nome{color:var(--txt-dim);}
+  .peso-row{display:grid; grid-template-columns:1fr 120px; gap:8px; align-items:center;}
+  .peso-row .lbl{font-size:13.5px; font-weight:600;}
+  .peso-row .lbl small{display:block; font-size:11px; color:var(--txt-dim); font-weight:400; margin-top:2px;}
+  .peso-row .inp{padding:9px 10px; text-align:right; font-weight:700;}
+  .peso-row .inp.mudou{border-color:var(--warn);}
+  .peso-row .inp.erro{border-color:var(--bad);}
+  .cmd-desc{font-size:11.5px; color:var(--txt-dim); margin-top:4px; line-height:1.35;}
+  .nomes-grid{display:grid; grid-template-columns:28px 1fr; gap:8px 8px; align-items:center;}
+  .nomes-grid .n{font-weight:700; color:var(--txt-dim); text-align:right;}
+  .nomes-grid .inp{padding:9px 10px; text-transform:uppercase;}
+  .nomes-grid .inp.mudou{border-color:var(--warn);}
+  .nomes-grid .inp.erro{border-color:var(--bad);}
+
+  .resumo{display:flex; justify-content:space-between; align-items:center; gap:10px; margin-top:10px; padding-top:10px; border-top:1px solid var(--card-b);}
+  .soma{font-size:20px; font-weight:800;}
+  .soma.ok{color:var(--ok);} .soma.bad{color:var(--bad);}
+  .msg{font-size:12px; margin-top:8px; min-height:16px;}
+  .msg.bad{color:var(--bad);} .msg.warn{color:var(--warn);} .msg.ok{color:var(--ok);}
+  .row{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .row .btn{flex:1;}
+  select.inp{font-size:14px; padding:9px 10px;}
+  .ts{font-size:10px; color:var(--txt-dim); margin-top:8px; text-align:right;}
+
+  .modal-overlay{display:none; position:fixed; inset:0; background:rgba(0,0,0,.65); z-index:50; align-items:flex-end; justify-content:center;}
+  .modal-overlay.open{display:flex;}
+  .modal-box{background:var(--card); border:1px solid var(--card-b); border-radius:16px 16px 0 0; width:100%; max-width:640px; max-height:88vh; display:flex; flex-direction:column;}
+  @media(min-width:640px){ .modal-overlay{align-items:center;} .modal-box{border-radius:16px;} }
+  .modal-head{display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border-bottom:1px solid var(--card-b);}
+  .modal-head h2{font-size:14px; margin:0; font-weight:700;}
+  .modal-close{background:none; border:none; color:var(--txt-dim); font-size:20px; line-height:1; cursor:pointer; padding:4px;}
+  .modal-body{overflow-y:auto; padding:12px 14px 16px; font-size:13px;}
+  .tbl{width:100%; border-collapse:collapse; font-size:12.5px;}
+  .tbl th{text-align:right; color:var(--txt-dim); font-weight:600; font-size:10.5px; text-transform:uppercase; padding:6px 4px; border-bottom:1px solid var(--card-b);}
+  .tbl td{padding:6px 4px; border-bottom:1px dashed var(--card-b); text-align:right; white-space:nowrap;}
+  .tbl th:first-child,.tbl td:first-child{text-align:left; white-space:normal;}
+  .tbl tr.mudou td{color:var(--warn); font-weight:700;}
+  .aviso{border-radius:10px; padding:10px 12px; font-size:12.5px; margin-top:10px; line-height:1.4;}
+  .aviso.warn{background:#332405; color:var(--warn);}
+  .aviso.bad{background:#2e1414; color:#fca5a5;}
+  .aviso.ok{background:#0f2e1c; color:var(--ok);}
+  .aviso.info{background:#14203a; color:#93c5fd;}
+  label.chk{display:flex; gap:8px; align-items:flex-start; margin-top:10px; font-size:12.5px;}
+  label.chk input{margin-top:2px; width:18px; height:18px;}
+  .log-item{border-top:1px dashed var(--card-b); padding:7px 0; font-size:12px;}
+  .log-item:first-child{border-top:none;}
+  .log-item .t{color:var(--txt-dim); font-size:11px;}
+
+  .bomba{display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-top:1px dashed var(--card-b); font-size:13px;}
+  .bomba:first-child{border-top:none;}
+  .grande{width:100%; padding:16px; font-size:16px; border-radius:12px; margin-top:10px;}
+  .btn.ok{background:var(--ok); color:#06210f;}
+  .btn.emerg{background:#b91c1c; font-size:17px; letter-spacing:.5px;}
+</style>
+</head>
+<body>
+
+<div id="lock-screen">
+  <div class="lock-icon">⚙️</div>
+  <h1>Comandos — Moinhos 501 / 502</h1>
+  <p>Grupo 5 (bombas hidráulicas) e parada do moinho. Mesmo PIN da tela de receitas.</p>
+  <form id="lock-form" autocomplete="off">
+    <input class="inp" type="text" id="lock-user" placeholder="Operador (obrigatório)" maxlength="60">
+    <input class="inp" type="password" id="lock-pin" placeholder="PIN" inputmode="numeric">
+    <button class="btn" type="submit" id="lock-btn">Entrar</button>
+    <div id="lock-error"></div>
+  </form>
+  <a class="hist-btn" href="mobile-status.html">← Voltar ao Status</a>
+</div>
+
+<div id="app-content" class="locked">
+<header>
+  <h1>Comandos<span id="hdr-user">—</span></h1>
+  <a class="hist-btn" href="mobile-status.html">← Status</a>
+  <div id="conn" class="conn-bad"><span class="dot"></span>…</div>
+</header>
+
+<div class="tabs">
+  <div class="tab active" data-linha="501">Linha 501</div>
+  <div class="tab" data-linha="502">Linha 502</div>
+</div>
+
+<main>
+  <div class="section-title">Grupo 5 — bombas hidráulicas</div>
+  <div class="card">
+    <div class="pills" id="g5-pills"></div>
+    <div id="g5-bombas" style="margin-top:10px"></div>
+    <div class="row">
+      <button class="btn ok" id="btn-ligar">Ligar Grupo 5</button>
+      <button class="btn sec" id="btn-desligar">Desligar Grupo 5</button>
+    </div>
+    <div class="cmd-desc">Ligar: grupo selecionado no supervisório, em REMOTO e sem intertravamento. Desligar: só com o moinho e o BM141 parados.
+      Com o moinho parado, o CLP desliga o grupo sozinho depois de 20 h.</div>
+    <div class="msg" id="g5-msg"></div>
+  </div>
+
+  <div class="section-title">Moinho</div>
+  <div class="card">
+    <div class="pills" id="m-pills"></div>
+    <button class="btn emerg grande" id="btn-parar">⛔ PARAR MOINHO</button>
+    <div class="cmd-desc">Para o moinho pelo mesmo comando do supervisório. <b>Não</b> é a parada de emergência de segurança — em risco a pessoas use o botão de emergência / corda.
+      Religar só pelo supervisório.</div>
+    <div class="msg" id="m-msg"></div>
+  </div>
+  <div class="ts" id="ts-leitura"></div>
+</main>
+</div>
+
+<div class="modal-overlay" id="modal">
+  <div class="modal-box">
+    <div class="modal-head"><h2 id="modal-tit">Confirmar</h2><button class="modal-close" id="modal-x">×</button></div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  'use strict';
+  var PIN = '';
+  var USER_KEY = 'receitas_operador';
+  var linhaAtiva = '501';
+  var estado = { '501': null, '502': null };
+  var ocupado = false, timerLeitura = null;
+
+  function $(id){ return document.getElementById(id); }
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function pill(cls, txt){ return '<span class="pill ' + cls + '">' + txt + '</span>'; }
+
+  async function api(metodo, url, corpo){
+    var h = { 'content-type': 'application/json' };
+    if (PIN) h['x-receitas-pin'] = PIN;
+    var r, ctl = window.AbortController ? new AbortController() : null;
+    var tmr = ctl ? setTimeout(function(){ ctl.abort(); }, 40000) : null;
+    try { r = await fetch(url, { method: metodo, headers: h, body: corpo ? JSON.stringify(corpo) : undefined, signal: ctl ? ctl.signal : undefined }); }
+    catch(e){ return { status: 0, corpo: { erro: 'rede', mensagem: 'Sem resposta do servidor.' } }; }
+    finally { if (tmr) clearTimeout(tmr); }
+    var j = {}; try { j = await r.json(); } catch(e){}
+    return { status: r.status, corpo: j };
+  }
+  function textoErro(r){
+    var c = r.corpo || {};
+    if (r.status === 401 || r.status === 429){ bloquear(c.mensagem || 'PIN inválido.'); }
+    if (r.status === 0) return 'Sem conexão com o servidor. ⚠ Resultado incerto — confira no supervisório.';
+    if (r.status === 503) return 'Escrita desabilitada no servidor (RECEITAS_PIN não configurado).';
+    if (r.status === 403) return 'Comandos só a partir da rede da fábrica / Tailscale.';
+    if (r.status === 504) return (c.mensagem || 'CLP sem resposta.') + (c.executado === 'incerto' ? ' ⚠ RESULTADO INCERTO — confira no supervisório.' : '');
+    return c.mensagem || ('Erro ' + r.status);
+  }
+
+  // ── PIN ─────────────────────────────────────────────────────────────────
+  function bloquear(msg){
+    PIN = '';
+    $('lock-screen').classList.remove('hidden');
+    $('app-content').classList.add('locked');
+    fecharModal();
+    clearTimeout(timerLeitura);
+    $('lock-error').textContent = msg || '';
+  }
+  $('lock-user').value = (function(){ try { return localStorage.getItem(USER_KEY) || ''; } catch(e){ return ''; } })();
+  $('lock-form').addEventListener('submit', async function(e){
+    e.preventDefault();
+    var u = $('lock-user').value.trim(), p = $('lock-pin').value;
+    if (!u){ $('lock-error').textContent = 'Informe o operador.'; return; }
+    if (!p){ $('lock-error').textContent = 'Informe o PIN.'; return; }
+    $('lock-btn').disabled = true; $('lock-error').textContent = '';
+    PIN = p;
+    var r = await api('POST', '/api/receitas/auth', {});
+    $('lock-btn').disabled = false; $('lock-pin').value = '';
+    if (r.status === 200){
+      try { localStorage.setItem(USER_KEY, u); } catch(e){}
+      $('hdr-user').textContent = 'Operador: ' + u;
+      $('lock-screen').classList.add('hidden');
+      $('app-content').classList.remove('locked');
+      ler();
+    } else {
+      PIN = '';
+      var c = r.corpo || {};
+      $('lock-error').textContent = r.status === 401 ? ('PIN incorreto.' + (c.restantes != null ? ' Restam ' + c.restantes + ' tentativa(s).' : '')) : textoErro(r);
+    }
+  });
+  function operador(){ return $('lock-user').value.trim(); }
+
+  // ── Leitura (a cada 5 s, só a linha aberta) ─────────────────────────────
+  async function ler(){
+    clearTimeout(timerLeitura);
+    if (!PIN) return;
+    var L = linhaAtiva;
+    var r = await api('GET', '/api/comandos/' + L);
+    if (r.status === 200 && r.corpo.estado){
+      estado[L] = r.corpo.estado;
+      $('conn').className = 'conn-ok'; $('conn').innerHTML = '<span class="dot"></span>CLP';
+      $('ts-leitura').textContent = 'Lido às ' + new Date().toLocaleTimeString('pt-BR');
+    } else {
+      $('conn').className = 'conn-bad'; $('conn').innerHTML = '<span class="dot"></span>' + (r.status === 504 ? 'CLP offline' : 'sem dados');
+    }
+    if (L === linhaAtiva) render();
+    timerLeitura = setTimeout(ler, 5000);
+  }
+
+  function render(){
+    var e = estado[linhaAtiva];
+    if (!e){ $('g5-pills').innerHTML = pill('pill-off', 'lendo…'); $('g5-bombas').innerHTML = ''; $('m-pills').innerHTML = ''; return; }
+    var g = e.grupo5;
+    var p = [];
+    p.push(g.ligado ? pill('pill-on', '● LIGADO') : (g.liga ? pill('pill-warn', '◐ PARTINDO') : pill('pill-off', '○ DESLIGADO')));
+    if (g.desliga) p.push(pill('pill-warn', 'DESLIGANDO'));
+    p.push(g.selecionado ? pill('pill-on', 'SELECIONADO') : pill('pill-bad', 'NÃO SELECIONADO'));
+    p.push(g.local ? pill('pill-bad', 'LOCAL') : pill('pill-on', 'REMOTO'));
+    var faltam = ['protecao','seguranca','maquina'].filter(function(k){ return !g[k]; });
+    if (faltam.length) p.push(pill('pill-bad', 'INTERTRAV.: ' + faltam.join(', ').toUpperCase()));
+    $('g5-pills').innerHTML = p.join('');
+    $('g5-bombas').innerHTML = e.bombas.map(function(b){
+      return '<div class="bomba"><span>' + esc(b.codigo) + '</span><span>' +
+        (b.falha ? pill('pill-bad', 'FALHA') : '') + ' ' + (b.ligado ? pill('pill-on', 'LIGADA') : pill('pill-off', 'DESLIGADA')) + '</span></div>';
+    }).join('');
+    var mp = [];
+    mp.push(e.moinhoRodando ? pill('pill-on', '● MOINHO RODANDO') : pill('pill-off', '○ MOINHO PARADO'));
+    mp.push(e.bm141Rodando ? pill('pill-warn', 'BM141 RODANDO') : pill('pill-off', 'BM141 parado'));
+    if (e.paradaMoinhoAtiva) mp.push(pill('pill-warn', 'DESLIGA ATIVO'));
+    $('m-pills').innerHTML = mp.join('');
+    $('btn-ligar').disabled = ocupado || g.ligado || g.liga;
+    $('btn-desligar').disabled = ocupado || g.desliga || e.moinhoRodando || e.bm141Rodando || (!g.ligado && !g.liga && !e.bombas.some(function(b){ return b.ligado; }));
+    $('btn-parar').disabled = ocupado || !e.moinhoRodando;
+  }
+
+  document.querySelectorAll('.tab').forEach(function(t){
+    t.addEventListener('click', function(){
+      document.querySelectorAll('.tab').forEach(function(x){ x.classList.remove('active'); });
+      t.classList.add('active'); linhaAtiva = t.dataset.linha;
+      $('g5-msg').textContent = ''; $('m-msg').textContent = '';
+      render(); ler();
+    });
+  });
+
+  // ── Modal ───────────────────────────────────────────────────────────────
+  function abrirModal(tit, html){ $('modal-tit').textContent = tit; $('modal-body').innerHTML = html; $('modal').classList.add('open'); }
+  function fecharModal(){ $('modal').classList.remove('open'); }
+  $('modal-x').addEventListener('click', fecharModal);
+  $('modal').addEventListener('click', function(ev){ if (ev.target === $('modal')) fecharModal(); });
+
+  function msg(id, cls, txt){ $(id).className = 'msg ' + cls; $(id).textContent = txt; }
+
+  async function enviar(url, corpo, msgId){
+    ocupado = true; render();
+    msg(msgId, 'warn', 'Enviando…');
+    var r = await api('POST', url, corpo);
+    ocupado = false;
+    if (r.status === 200){ msg(msgId, 'ok', r.corpo.mensagem || 'Comando enviado.'); if (r.corpo.estado) estado[linhaAtiva] = r.corpo.estado; }
+    else msg(msgId, 'bad', textoErro(r));
+    render(); ler();
+  }
+
+  $('btn-ligar').addEventListener('click', function(){
+    var L = linhaAtiva;
+    abrirModal('Ligar Grupo 5 — linha ' + L,
+      '<div class="aviso warn">Partida remota das bombas hidráulicas da linha <b>' + L + '</b> (lubrificação, levantamento e água).</div>' +
+      '<label class="chk"><input type="checkbox" id="chk-seg"> Confirmo que não há pessoas expostas nos equipamentos do Grupo 5 e que o equipamento em manutenção está bloqueado (LOTO).</label>' +
+      '<div class="aviso info">Linha <b>' + L + '</b> · Operador <b>' + esc(operador()) + '</b></div>' +
+      '<div class="row"><button class="btn sec" id="m-cancel">Cancelar</button><button class="btn ok" id="m-ok" disabled>Ligar Grupo 5</button></div>');
+    $('chk-seg').addEventListener('change', function(){ $('m-ok').disabled = !this.checked; });
+    $('m-cancel').addEventListener('click', fecharModal);
+    $('m-ok').addEventListener('click', function(){
+      fecharModal();
+      enviar('/api/comandos/' + L + '/grupo5', { usuario: operador(), acao: 'ligar', confirmaSeguranca: true }, 'g5-msg');
+    });
+  });
+
+  $('btn-desligar').addEventListener('click', function(){
+    var L = linhaAtiva;
+    abrirModal('Desligar Grupo 5 — linha ' + L,
+      '<div class="aviso warn">Desliga as bombas hidráulicas da linha <b>' + L + '</b>. O servidor só aceita com o moinho e o BM141 parados.</div>' +
+      '<div class="aviso info">Linha <b>' + L + '</b> · Operador <b>' + esc(operador()) + '</b></div>' +
+      '<div class="row"><button class="btn sec" id="m-cancel">Cancelar</button><button class="btn danger" id="m-ok">Desligar Grupo 5</button></div>');
+    $('m-cancel').addEventListener('click', fecharModal);
+    $('m-ok').addEventListener('click', function(){
+      fecharModal();
+      enviar('/api/comandos/' + L + '/grupo5', { usuario: operador(), acao: 'desligar' }, 'g5-msg');
+    });
+  });
+
+  $('btn-parar').addEventListener('click', function(){
+    var L = linhaAtiva;
+    abrirModal('⛔ Parar moinho ' + L,
+      '<div class="aviso bad">O moinho <b>' + L + '</b> será desligado agora. Religar só pelo supervisório.<br>Em risco a pessoas, use o botão de emergência / corda — este comando não substitui a parada de emergência de segurança.</div>' +
+      '<div style="margin-top:10px;font-size:12.5px">Digite <b>PARAR</b> para confirmar:</div>' +
+      '<input class="inp" id="m-conf" autocomplete="off" autocapitalize="characters" style="margin-top:6px;text-transform:uppercase">' +
+      '<div class="aviso info">Linha <b>' + L + '</b> · Operador <b>' + esc(operador()) + '</b></div>' +
+      '<div class="row"><button class="btn sec" id="m-cancel">Cancelar</button><button class="btn emerg" id="m-ok" disabled>PARAR MOINHO ' + L + '</button></div>');
+    $('m-conf').addEventListener('input', function(){ $('m-ok').disabled = this.value.trim().toUpperCase() !== 'PARAR'; });
+    $('m-cancel').addEventListener('click', fecharModal);
+    $('m-ok').addEventListener('click', function(){
+      fecharModal();
+      enviar('/api/comandos/' + L + '/parar-moinho', { usuario: operador(), confirmacao: 'PARAR' }, 'm-msg');
+    });
+    setTimeout(function(){ $('m-conf').focus(); }, 50);
+  });
+})();
+</script>
+</body>
+</html>

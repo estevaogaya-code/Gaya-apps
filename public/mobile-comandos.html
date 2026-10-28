@@ -293,6 +293,8 @@
       $('ts-leitura').textContent = 'Lido às ' + new Date().toLocaleTimeString('pt-BR');
     } else {
       $('conn').className = 'conn-bad'; $('conn').innerHTML = '<span class="dot"></span>' + (r.status === 504 ? 'CLP offline' : 'sem dados');
+      if (r.status === 404) $('ts-leitura').textContent = 'O servidor não tem os comandos (receitas.js antigo ou PM2 não reiniciado).';
+      else if (r.status !== 200) $('ts-leitura').textContent = textoErro(r);
     }
     if (L === linhaAtiva) render();
     timerLeitura = setTimeout(ler, 5000);
@@ -300,7 +302,12 @@
 
   function render(){
     var e = estado[linhaAtiva];
-    if (!e){ $('g5-pills').innerHTML = pill('pill-off', 'lendo…'); $('g5-bombas').innerHTML = ''; $('m-pills').innerHTML = ''; return; }
+    if (!e){
+      $('g5-pills').innerHTML = pill('pill-off', 'lendo…'); $('g5-bombas').innerHTML = ''; $('m-pills').innerHTML = '';
+      // sem estado lido não há como aplicar as regras na tela: botões travados
+      $('btn-ligar').disabled = $('btn-desligar').disabled = $('btn-parar').disabled = true;
+      return;
+    }
     var g = e.grupo5;
     var p = [];
     p.push(g.ligado ? pill('pill-on', '● LIGADO') : (g.liga ? pill('pill-warn', '◐ PARTINDO') : pill('pill-off', '○ DESLIGADO')));

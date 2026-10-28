@@ -350,7 +350,6 @@
     'tot501_min_dia','tot501_ton_total','tot501_prod_t2','tot501_th_t2','tot501_min_t2',
     'tot502_min_dia','tot502_ton_total','tot502_ton_diurno','tot502_prod_t2','tot502_th_t2','tot502_min_t2',
     'tot501_kwht_clp','tot502_kwht_clp',                  // kWh/t (KPI)
-    'th_501wf005','th_501wf010','th_502wf005','th_502wf010', // ton/h atual (pesagem)
     'ea_501bm140_pt_u01','ea_502bm140_pt_u01',             // pressão diferencial moinho
     'ea_501bm140_pt_u02','ea_502bm140_pt_u02',             // pressão saída moinho
     'ea_501bm140_tt_u08','ea_502bm140_tt_u08',             // temp. entrada (gases) moinho
@@ -366,8 +365,17 @@
   var gotDigital = false, gotAnalog = false;
 
   function codeFromAnalogId(id){
-    var m = /^ea_(?:rede_)?(\d{3}[a-z]{2,4}\d{1,4})/i.exec(id);
+    var m = /^ea_(?:rede_)?(\d{3}[a-z]{2,4}\d{1,4})/i.exec(id)
+         || /^(?:sp|th)_(\d{3}wf\d{3})$/i.exec(id); // setpoint e vazão atual das dosadoras
     return m ? m[1].toUpperCase() : null;
+  }
+  // Rótulo e ordem no card das dosadoras: corrente/velocidade, peso, vazão, setpoint
+  var LABEL_DOSADORA = { th:'VAZÃO ATUAL', sp:'SETPOINT' };
+  function rankAnalog(id){
+    if (/^ea_rede_/.test(id)) return 0;
+    if (/^th_/.test(id)) return 2;
+    if (/^sp_/.test(id)) return 3;
+    return 1;
   }
   function codeFromDintTagName(tagName){
     // ex: M501WF005 -> 501WF005 | M501LQ145A01 -> 501LQ145A01
@@ -910,11 +918,13 @@
 
   function analogRowsHtml(ids){
     if (!ids || !ids.length) return '';
+    ids = ids.slice().sort(function(a,b){ return rankAnalog(a) - rankAnalog(b); });
     return '<div class="analogs">' + ids.map(function(id){
       var meta = analogMeta[id]; var st = analogState[id] || {};
       var val = (st.valor === null || st.valor === undefined) ? '—' : st.valor;
       var alClass = st.alarme && st.alarme !== 'normal' ? ' alarme-' + st.alarme : '';
-      var label = meta.label.replace(/\s*\d{3}[A-Z]{2,4}\d{1,4}\s*/i,'').trim() || meta.label;
+      var label = LABEL_DOSADORA[id.slice(0,2)] && /^(sp|th)_/.test(id) ? LABEL_DOSADORA[id.slice(0,2)]
+                : (meta.label.replace(/\s*\d{3}[A-Z]{2,4}\d{1,4}\s*/i,'').trim() || meta.label);
       return '<div class="aitem" data-analog-id="'+id+'"><span class="lbl">'+label+'</span>' +
              '<span class="val'+alClass+'">'+val+' '+(meta.unit||'')+'</span></div>';
     }).join('') + '</div>';

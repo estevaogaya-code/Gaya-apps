@@ -853,7 +853,7 @@
       doc.setFontSize(13); doc.setFont(undefined,'bold');
       doc.text('Consumo de Matéria-Prima por Data (t)', 14, 16);
       doc.setFont(undefined,'normal'); doc.setFontSize(9); doc.setTextColor(120);
-      doc.text('Consumo calculado = produção de cada turno × proporção da receita (linhas 501 e 502' + (temCpiiz ? ' e CPII-Z' : '') + '), mesma regra da aba Estoque.', 14, 22);
+      doc.text('Consumo calculado = produção de cada turno × proporção da receita (linhas 501 e 502' + (temCpiiz ? ' e CPII-Z' : '') + ') + Pozomix 7510 MIX × receita da mistura, mesma regra da aba Estoque.', 14, 22);
       doc.setTextColor(0);
       if (!consDias.length || !mats.length) {
         doc.setFontSize(10); doc.text('Sem consumo calculado no período (verifique receitas/produção no app).', 14, 32);

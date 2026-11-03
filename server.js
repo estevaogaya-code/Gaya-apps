@@ -930,6 +930,12 @@ app.get('/api/boletim/detalhe', async (req, res) => {
       const c = consumoRow(r);
       Object.keys(c).forEach(n => { if (c[n]) tot[n] = (tot[n] || 0) + c[n]; });
     });
+    // Pozomix 7510 MIX (misturador 600MX022): expedido × receita da mistura do dia
+    const rs = pega(mes.saidas);
+    if (rs && N(rs.pozo7510mix) > 0) {
+      const c = calcMps(N(rs.pozo7510mix), receitasApp.find(x => x.produto === rs.receitaMix));
+      Object.keys(c).forEach(n => { if (c[n]) tot[n] = (tot[n] || 0) + c[n]; });
+    }
     if (Object.keys(tot).length) { consDias.push({ data: dataDia, tot }); Object.keys(tot).forEach(n => usadas.add(n)); }
   }
   const ordem = Array.isArray(payload.materiais) ? payload.materiais : ['Clinquer Uruguay','Clinquer Caçapava','Escória','Gesso','Aditivo','Cinza'];

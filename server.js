@@ -12,6 +12,7 @@ const path      = require('path');
 const fs        = require('fs');
 const { Controller, Tag, TagGroup } = require('st-ethernet-ip');
 const criarReceitas = require('./receitas');
+const criarMisturador = require('./misturador');
 
 const CLP_CONFIG = { ip: '10.0.0.100', slot: 0, readInterval: 3000 };
 
@@ -443,6 +444,10 @@ const receitas = criarReceitas({
   onNomes: (linha, nomes) => { nomesCache = { ...nomesCache, [linha]: nomes }; broadcast({ tipo: 'nomes_produtos', nomes: nomesCache }); },
 });
 app.use(receitas.router);
+
+// Misturador 600MX022 — tela de acompanhamento, só leitura (ver misturador.js)
+const misturador = criarMisturador({ Tag, dir: __dirname, pinConfere: criarReceitas.pinConfere, ipConfiavel: criarReceitas.ipConfiavel });
+app.use(misturador.router);
 
 function broadcast(data) {
   const m = JSON.stringify(data);
@@ -2911,6 +2916,7 @@ async function iniciarEthernetIP() {
           try {
             await receitas.processarFila(PLC); // operações de receita, sem concorrência com a leitura
             const { ok, erros } = await lerTodosOsTags(PLC);
+            await receitas.exclusivo(() => misturador.lerCiclo(PLC), 3000); // só lê com a tela aberta
             // Mesma auto-cura que o server-pa2.js já tinha: se o ciclo inteiro
             // vier com 0 leituras OK, a sessão CIP morreu silenciosamente
             // (cada tag individual só dá timeout, sem lançar exceção — por

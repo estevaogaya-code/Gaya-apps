@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Misturador 600MX022</title>
+<!--
+  Tela de acompanhamento do misturador 600MX022 (silo 7) — SOMENTE LEITURA.
+  Dados: GET /api/misturador (misturador.js), atualizado a cada 2 s.
+  Único "comando": editar o nome do material de cada cápsula (não vai ao CLP;
+  fica em misturador_config.json no servidor), com o PIN das receitas.
+-->
+<style>
+  :root{
+    --bg:#0b1220; --card:#131c2e; --card-b:#1f2c44; --txt:#e6edf6; --txt-dim:#8493ab;
+    --ok:#22c55e; --off:#4b5568; --bad:#ef4444; --warn:#f59e0b; --accent:#3b82f6; --cinza:#a8b3c4;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--txt); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; -webkit-tap-highlight-color:transparent;}
+  header{position:sticky; top:0; z-index:10; background:#0b1220ee; backdrop-filter:blur(6px); padding:12px 14px; border-bottom:1px solid var(--card-b);
+    display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;}
+  header h1{font-size:15px; margin:0; font-weight:600;}
+  header h1 span{color:var(--txt-dim); font-weight:400; font-size:12px; display:block; margin-top:2px;}
+  .btn-l{background:var(--card); color:var(--txt); border:1px solid var(--card-b); padding:6px 10px; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; text-decoration:none; white-space:nowrap;}
+  #conn{font-size:11px; padding:4px 9px; border-radius:20px; font-weight:600; display:flex; align-items:center; gap:5px;}
+  #conn .dot{width:7px; height:7px; border-radius:50%;}
+  .conn-ok{background:#0f2e1c; color:var(--ok);} .conn-ok .dot{background:var(--ok);}
+  .conn-bad{background:#2e1414; color:var(--bad);} .conn-bad .dot{background:var(--bad); animation:pulse 1s infinite;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+  main{padding:12px 14px 50px; max-width:760px; margin:0 auto;}
+  .sec{font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--txt-dim); margin:18px 2px 8px; font-weight:700; display:flex; justify-content:space-between; align-items:center;}
+  .card{background:var(--card); border:1px solid var(--card-b); border-radius:14px; padding:14px;}
+  .pill{font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; display:inline-flex; align-items:center; gap:4px; white-space:nowrap;}
+  .p-on{background:#0f2e1c; color:var(--ok);} .p-off{background:#1a2233; color:var(--txt-dim);}
+  .p-bad{background:#2e1414; color:var(--bad);} .p-warn{background:#332405; color:var(--warn);}
+
+  /* Balança */
+  .peso-top{display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;}
+  .peso{font-size:52px; font-weight:800; line-height:1; letter-spacing:-1px; font-variant-numeric:tabular-nums;}
+  .peso small{font-size:18px; color:var(--txt-dim); font-weight:600; margin-left:4px;}
+  .bar{height:14px; background:#0b1220; border:1px solid var(--card-b); border-radius:8px; overflow:hidden; margin-top:12px; position:relative;}
+  .bar .f{height:100%; background:linear-gradient(90deg,#2563eb,#3b82f6); transition:width .6s;}
+  .bar .f.cheio{background:linear-gradient(90deg,#16a34a,#22c55e);} .bar .f.acima{background:linear-gradient(90deg,#d97706,#f59e0b);}
+  .bar.fina{height:6px; margin-top:6px;}
+  .bar-legenda{display:flex; justify-content:space-between; font-size:11px; color:var(--txt-dim); margin-top:5px;}
+
+  /* Silo 7 */
+  .silo{display:grid; grid-template-columns:repeat(4,1fr); gap:10px;}
+  @media(max-width:520px){ .silo{grid-template-columns:repeat(2,1fr);} }
+  .caps{background:var(--card); border:1px solid var(--card-b); border-radius:14px; padding:10px 10px 12px; text-align:center; position:relative; transition:border-color .3s;}
+  .caps.aberta{border-color:var(--ok); box-shadow:0 0 0 1px #22c55e55 inset;}
+  .caps.alerta{border-color:var(--warn);}
+  .forma{width:62px; height:70px; margin:2px auto 8px; position:relative;}
+  .forma .corpo{position:absolute; left:6px; right:6px; top:0; height:40px; background:#1c2840; border:2px solid #31415f; border-bottom:none; border-radius:6px 6px 0 0;}
+  .forma .cone{position:absolute; left:6px; right:6px; top:40px; height:22px; background:#1c2840; border:2px solid #31415f; border-top:none;
+    clip-path:polygon(0 0,100% 0,62% 100%,38% 100%);}
+  .forma .fluxo{position:absolute; left:50%; top:60px; width:6px; height:10px; margin-left:-3px; border-radius:2px; background:transparent;}
+  .caps.aberta .fluxo{background:var(--ok); animation:cair .7s linear infinite;}
+  @keyframes cair{0%{opacity:.3; transform:translateY(-3px)}100%{opacity:1; transform:translateY(3px)}}
+  .caps .num{font-size:13px; font-weight:800;}
+  .caps .mat{font-size:12.5px; font-weight:700; margin-top:3px; min-height:16px; color:var(--cinza); overflow-wrap:anywhere;}
+  .caps .mat.vazio{color:var(--txt-dim); font-weight:400; font-style:italic;}
+  .caps .fg{font-size:10.5px; color:var(--txt-dim); margin:6px 0 6px;}
+  .seta{text-align:center; color:var(--txt-dim); font-size:18px; margin:8px 0 2px;}
+
+  /* Misturador / descarga */
+  .linha{display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 0; border-top:1px dashed var(--card-b); font-size:13.5px;}
+  .linha:first-child{border-top:none; padding-top:0;}
+  .vals{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px;}
+  .val{background:#0f1729; border:1px solid var(--card-b); border-radius:10px; padding:8px 10px;}
+  .val .l{font-size:10.5px; color:var(--txt-dim); text-transform:uppercase; letter-spacing:.4px;}
+  .val .v{font-size:20px; font-weight:800; font-variant-numeric:tabular-nums;}
+  .ts{font-size:10.5px; color:var(--txt-dim); text-align:right; margin-top:10px;}
+  .aviso{border-radius:10px; padding:10px 12px; font-size:12.5px; margin-top:10px; background:#332405; color:var(--warn); line-height:1.4;}
+
+  /* Modal */
+  .ov{display:none; position:fixed; inset:0; background:rgba(0,0,0,.65); z-index:50; align-items:flex-end; justify-content:center;}
+  .ov.open{display:flex;}
+  @media(min-width:640px){ .ov{align-items:center;} }
+  .box{background:var(--card); border:1px solid var(--card-b); border-radius:16px; width:100%; max-width:460px; padding:14px;}
+  .box h2{font-size:15px; margin:0 0 10px;}
+  .fr{display:grid; grid-template-columns:60px 1fr; gap:8px; align-items:center; margin-bottom:8px; font-size:13px;}
+  .inp{background:#0f1729; border:1px solid var(--card-b); color:var(--txt); padding:10px 12px; border-radius:10px; font-size:15px; outline:none; width:100%; text-transform:uppercase;}
+  .inp:focus{border-color:var(--accent);}
+  .row{display:flex; gap:8px; margin-top:10px;} .row .b{flex:1;}
+  .b{background:var(--accent); color:#fff; border:none; padding:11px; border-radius:10px; font-weight:700; font-size:14px; cursor:pointer;}
+  .b.sec2{background:var(--card); color:var(--txt); border:1px solid var(--card-b);}
+  #m-err{color:var(--bad); font-size:12px; min-height:16px; margin-top:6px;}
+</style>
+</head>
+<body>
+<header>
+  <h1>Misturador 600MX022<span>Silo 7 · somente leitura</span></h1>
+  <a class="btn-l" href="mobile-status.html">← Status</a>
+  <div id="conn" class="conn-bad"><span class="dot"></span>conectando…</div>
+</header>
+
+<main>
+  <div class="sec"><span>Balança</span><span id="seletora"></span></div>
+  <div class="card">
+    <div class="peso-top">
+      <div class="peso" id="peso">—<small>kg</small></div>
+      <div style="text-align:right">
+        <div style="font-size:11px;color:var(--txt-dim)">Batelada</div>
+        <div style="font-size:20px;font-weight:800" id="bat-meta">— kg</div>
+        <div style="font-size:12px;color:var(--txt-dim)" id="bat-falta"></div>
+      </div>
+    </div>
+    <div class="bar"><div class="f" id="bar-bat" style="width:0%"></div></div>
+    <div class="bar-legenda"><span>0</span><span id="bar-bat-pct">0%</span><span id="bar-bat-max">1.000 kg</span></div>
+    <div class="bar fina"><div class="f" id="bar-cap" style="width:0%"></div></div>
+    <div class="bar-legenda"><span>Capacidade da balança</span><span id="bar-cap-max">6.000 kg</span></div>
+  </div>
+
+  <div class="sec"><span>Silo 7 — cápsulas</span><button class="btn-l" id="btn-mat">✏️ Materiais</button></div>
+  <div class="silo" id="silo"></div>
+  <div class="seta">▼ ▼ ▼ ▼</div>
+
+  <div class="sec"><span>Misturador / balança 600MX022</span></div>
+  <div class="card">
+    <div class="linha"><span>Estado</span><span id="mx-estado"></span></div>
+    <div class="vals">
+      <div class="val"><div class="l">Velocidade</div><div class="v" id="mx-hz">—</div></div>
+      <div class="val"><div class="l">Corrente</div><div class="v" id="mx-a">—</div></div>
+    </div>
+  </div>
+
+  <div class="sec"><span>Descarga</span></div>
+  <div class="card" id="descargas"></div>
+  <div id="aviso"></div>
+  <div class="ts" id="ts"></div>
+</main>
+
+<div class="ov" id="ov">
+  <div class="box">
+    <h2>Material de cada cápsula</h2>
+    <div id="m-campos"></div>
+    <input class="inp" type="password" id="m-pin" placeholder="PIN" inputmode="numeric" style="text-transform:none">
+    <div id="m-err"></div>
+    <div class="row"><button class="b sec2" id="m-cancel">Cancelar</button><button class="b" id="m-ok">Salvar</button></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  'use strict';
+  var dados = null, timer = null, desde = {};
+  function $(id){ return document.getElementById(id); }
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function kg(v){ return Math.round(Number(v) || 0).toLocaleString('pt-BR'); }
+  function num(v, c){ return v == null ? '—' : Number(v).toLocaleString('pt-BR', { minimumFractionDigits: c, maximumFractionDigits: c }); }
+  function pill(cls, t){ return '<span class="pill ' + cls + '">' + t + '</span>'; }
+
+  function pillValvula(v){
+    if (!v || v.erro) return pill('p-bad', 'SEM LEITURA');
+    if (v.aberta && v.comandoAbrir) return pill('p-on', '● ABERTA');
+    if (v.fechada && !v.comandoAbrir) return pill('p-off', '○ FECHADA');
+    if (v.comandoAbrir && !v.aberta) return pill('p-warn', '◐ ABRINDO');
+    if (!v.comandoAbrir && v.aberta) return pill('p-warn', '◐ FECHANDO');
+    return pill('p-warn', 'SEM POSIÇÃO');
+  }
+
+  async function ler(){
+    clearTimeout(timer);
+    try {
+      var r = await fetch('/api/misturador', { cache: 'no-store' });
+      dados = await r.json();
+      render();
+    } catch(e) {
+      $('conn').className = 'conn-bad'; $('conn').innerHTML = '<span class="dot"></span>sem servidor';
+    }
+    timer = setTimeout(ler, 2000);
+  }
+
+  function render(){
+    var e = dados && dados.estado, idade = dados && dados.idadeMs;
+    var velho = !e || idade == null || idade > 15000;
+    $('conn').className = velho ? 'conn-bad' : 'conn-ok';
+    $('conn').innerHTML = '<span class="dot"></span>' + (!e ? 'aguardando CLP' : velho ? 'dados parados' : 'CLP');
+
+    var bat = (dados && dados.batelada) || 1000, cap = (dados && dados.balancaMax) || 6000;
+    $('bat-meta').textContent = kg(bat) + ' kg';
+    $('bar-bat-max').textContent = kg(bat) + ' kg';
+    $('bar-cap-max').textContent = kg(cap) + ' kg';
+    var peso = e ? e.peso : null;
+    $('peso').innerHTML = (peso == null ? '—' : kg(peso)) + '<small>kg</small>';
+    var pct = peso == null ? 0 : Math.max(0, peso) / bat * 100;
+    var fb = $('bar-bat');
+    fb.style.width = Math.min(100, pct) + '%';
+    fb.className = 'f' + (pct > 102 ? ' acima' : pct >= 98 ? ' cheio' : '');
+    $('bar-bat-pct').textContent = Math.round(pct) + '%';
+    $('bat-falta').textContent = peso == null ? '' : peso < bat ? 'faltam ' + kg(bat - peso) + ' kg' : peso > bat * 1.02 ? kg(peso - bat) + ' kg acima' : 'batelada completa';
+    $('bar-cap').style.width = (peso == null ? 0 : Math.min(100, Math.max(0, peso) / cap * 100)) + '%';
+
+    var s = e && e.seletora;
+    $('seletora').innerHTML = !s || !s.configurada ? pill('p-off', 'SELETORA NÃO CONFIGURADA')
+      : s.habilitada == null ? pill('p-bad', 'SELETORA SEM LEITURA')
+      : s.habilitada ? pill('p-on', '● DOSAGEM HABILITADA') : pill('p-off', '○ DOSAGEM DESABILITADA');
+
+    var caps = (e && e.capsulas) || (dados && dados.capsulas) || [];
+    $('silo').innerHTML = caps.map(function(c){
+      var cls = c.aberta && c.comandoAbrir ? ' aberta' : (c.divergente || c.indefinida || c.erro) ? ' alerta' : '';
+      return '<div class="caps' + cls + '"><div class="forma"><div class="corpo"></div><div class="cone"></div><div class="fluxo"></div></div>' +
+        '<div class="num">Cápsula ' + esc(c.id) + '</div>' +
+        '<div class="mat' + (c.rotulo ? '' : ' vazio') + '">' + (c.rotulo ? esc(c.rotulo) : 'sem material') + '</div>' +
+        '<div class="fg">' + esc(c.fg) + '</div>' + (e ? pillValvula(c) : pill('p-off', '—')) + '</div>';
+    }).join('');
+
+    var m = e && e.misturador;
+    $('mx-estado').innerHTML = !m ? pill('p-off', '—') : m.falha ? pill('p-bad', '⚠ FALHA / TRIP')
+      : m.ligado ? pill('p-on', '● LIGADO') : pill('p-off', '○ DESLIGADO') + (m.pronto ? ' ' + pill('p-off', 'PRONTO') : '');
+    $('mx-hz').innerHTML = m ? num(m.hz, 1) + ' <small style="font-size:12px;color:var(--txt-dim)">Hz</small>' : '—';
+    $('mx-a').innerHTML = m ? num(m.a, 1) + ' <small style="font-size:12px;color:var(--txt-dim)">A</small>' : '—';
+
+    var d = (e && e.descargas) || [];
+    $('descargas').innerHTML = d.length ? d.map(function(v){ return '<div class="linha"><span>' + esc(v.fg) + '</span>' + pillValvula(v) + '</div>'; }).join('')
+      : '<div class="linha"><span style="color:var(--txt-dim)">Aguardando leitura…</span></div>';
+
+    // Só avisa se a válvula ficar sem confirmação de posição por mais de 15 s (abrir/fechar leva alguns segundos)
+    var agoraMs = Date.now();
+    caps.forEach(function(c){ if (e && (c.divergente || c.indefinida)) { if (!desde[c.fg]) desde[c.fg] = agoraMs; } else delete desde[c.fg]; });
+    var alertas = caps.filter(function(c){ return desde[c.fg] && agoraMs - desde[c.fg] > 15000; }).map(function(c){ return c.fg; });
+    $('aviso').innerHTML = alertas.length ? '<div class="aviso">Válvula sem confirmação de posição: ' + alertas.join(', ') + '. Se persistir, confira o fim de curso.</div>' : '';
+    $('ts').textContent = e ? 'Leitura do CLP às ' + new Date(e.ts).toLocaleTimeString('pt-BR') : 'O servidor começa a ler o CLP quando esta tela é aberta — aguarde alguns segundos.';
+  }
+
+  // ── Materiais das cápsulas ──
+  $('btn-mat').addEventListener('click', function(){
+    var caps = (dados && dados.capsulas) || [];
+    $('m-campos').innerHTML = caps.map(function(c){
+      return '<div class="fr"><span>' + esc(c.id) + '</span><input class="inp" maxlength="20" data-id="' + esc(c.id) + '" value="' + esc(c.rotulo) + '" placeholder="ex.: CINZA AMBAR"></div>';
+    }).join('');
+    $('m-err').textContent = ''; $('ov').classList.add('open');
+  });
+  $('m-cancel').addEventListener('click', function(){ $('ov').classList.remove('open'); });
+  $('m-ok').addEventListener('click', async function(){
+    var rot = {};
+    document.querySelectorAll('#m-campos input').forEach(function(i){ rot[i.dataset.id] = i.value.trim(); });
+    $('m-ok').disabled = true;
+    try {
+      var r = await fetch('/api/misturador/rotulos', { method: 'POST', headers: { 'content-type': 'application/json', 'x-receitas-pin': $('m-pin').value },
+        body: JSON.stringify({ rotulos: rot }) });
+      var j = await r.json();
+      if (r.ok){ $('ov').classList.remove('open'); $('m-pin').value = ''; ler(); }
+      else $('m-err').textContent = j.mensagem || ('Erro ' + r.status);
+    } catch(e){ $('m-err').textContent = 'Sem conexão com o servidor.'; }
+    $('m-ok').disabled = false;
+  });
+
+  ler();
+})();
+</script>
+</body>
+</html>

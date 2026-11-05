@@ -13,6 +13,7 @@ coleta_processo_anterior.json
 backups_payload/
 receitas_presets.json
 receitas_log.jsonl
+misturador_config.json
 *.tmp
 
 # Dependências e arquivos locais

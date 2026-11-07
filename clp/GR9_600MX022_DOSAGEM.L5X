@@ -1,0 +1,680 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<RSLogix5000Content SchemaRevision="1.0" SoftwareRevision="17.00" TargetName="GR9_600MX022_DOSAGEM" TargetType="Routine" TargetSubType="RLL" ContainsContext="true" ExportDate="Sat Nov 07 12:00:00 2026" ExportOptions="References NoRawData L5KData DecoratedData ForceProtectedEncoding AllProjDocTrans">
+<Controller Use="Context" Name="MOAGEM_ES">
+<DataTypes Use="Context">
+</DataTypes>
+<Tags Use="Context">
+<Tag Name="MX22_AUTO" TagType="Base" DataType="BOOL" Radix="Decimal">
+<Description>
+<![CDATA[Dosagem automatica ativa (= seletora ED_600MX022_DOSAGEM)]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0]]>
+</Data>
+</Tag>
+<Tag Name="MX22_PASSO" TagType="Base" DataType="DINT" Radix="Decimal">
+<Description>
+<![CDATA[Passo: 0 parado, 10 aguarda, 20 produto, 22 capsula, 25 dosando, 30 estabiliza, 40 descarga, 45 registra, 90 pausa]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0]]>
+</Data>
+</Tag>
+<Tag Name="MX22_PROD" TagType="Base" DataType="DINT" Radix="Decimal">
+<Description>
+<![CDATA[Produto em dosagem (1..4)]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0]]>
+</Data>
+</Tag>
+<Tag Name="MX22_CAP" TagType="Base" DataType="DINT" Radix="Decimal">
+<Description>
+<![CDATA[Capsula aberta (1=7.1 2=7.2 3=7.3 4=7.4)]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0]]>
+</Data>
+</Tag>
+<Tag Name="MX22_PESO" TagType="Base" DataType="REAL" Radix="Float">
+<Description>
+<![CDATA[Peso da balanca 600MX022 (kg)]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0.00000000e+00]]>
+</Data>
+</Tag>
+<Tag Name="MX22_LOTE" TagType="Base" DataType="REAL" Radix="Float">
+<Description>
+<![CDATA[Peso da batelada (kg)]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[1.00000000e+03]]>
+</Data>
+</Tag>
+<Tag Name="MX22_VAZIO" TagType="Base" DataType="REAL" Radix="Float">
+<Description>
+<![CDATA[Balanca vazia / descarga completa abaixo de (kg)]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[1.00000000e+02]]>
+</Data>
+</Tag>
+<Tag Name="MX22_P0" TagType="Base" DataType="REAL" Radix="Float">
+<Description>
+<![CDATA[Peso no inicio do produto (kg)]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0.00000000e+00]]>
+</Data>
+</Tag>
+<Tag Name="MX22_PREF" TagType="Base" DataType="REAL" Radix="Float">
+<Description>
+<![CDATA[Peso de referencia da janela de capsula vazia]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0.00000000e+00]]>
+</Data>
+</Tag>
+<Tag Name="MX22_DELTA" TagType="Base" DataType="REAL" Radix="Float">
+<Description>
+<![CDATA[Ganho de peso na janela de 20 s]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0.00000000e+00]]>
+</Data>
+</Tag>
+<Tag Name="MX22_NOMINAL" TagType="Base" DataType="REAL" Radix="Float">
+<Description>
+<![CDATA[Alvo nominal do produto (pct x lote)]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0.00000000e+00]]>
+</Data>
+</Tag>
+<Tag Name="MX22_ALVO" TagType="Base" DataType="REAL" Radix="Float">
+<Description>
+<![CDATA[Alvo do produto com compensacao (kg)]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0.00000000e+00]]>
+</Data>
+</Tag>
+<Tag Name="MX22_LIM" TagType="Base" DataType="REAL" Radix="Float">
+<Description>
+<![CDATA[Tolerancia 10% do nominal (kg)]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0.00000000e+00]]>
+</Data>
+</Tag>
+<Tag Name="MX22_DOSADO" TagType="Base" DataType="REAL" Radix="Float">
+<Description>
+<![CDATA[Peso dosado do produto ate agora (kg)]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0.00000000e+00]]>
+</Data>
+</Tag>
+<Tag Name="MX22_DOS_FECH" TagType="Base" DataType="REAL" Radix="Float">
+<Description>
+<![CDATA[Peso dosado no instante do fechamento]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0.00000000e+00]]>
+</Data>
+</Tag>
+<Tag Name="MX22_SOMA" TagType="Base" DataType="REAL" Radix="Float">
+<Description>
+<![CDATA[Soma dos percentuais ativos]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0.00000000e+00]]>
+</Data>
+</Tag>
+<Tag Name="MX22_PCT" TagType="Base" DataType="REAL" Dimensions="8" Radix="Float">
+<Description>
+<![CDATA[Receita [1..4] fracao de cada produto - escrita pelo servidor]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[[0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000]]]>
+</Data>
+</Tag>
+<Tag Name="MX22_CAP_PROD" TagType="Base" DataType="DINT" Dimensions="8" Radix="Decimal">
+<Description>
+<![CDATA[Capsula [1..4] -> produto (0 = nao usada) - escrita pelo servidor]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[[0,0,0,0,0,0,0,0]]]>
+</Data>
+</Tag>
+<Tag Name="MX22_RCP_SEQ" TagType="Base" DataType="DINT" Radix="Decimal">
+<Description>
+<![CDATA[Numero da receita escrita pelo servidor]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0]]>
+</Data>
+</Tag>
+<Tag Name="MX22_PCT_ATIVO" TagType="Base" DataType="REAL" Dimensions="8" Radix="Float">
+<Description>
+<![CDATA[Receita em uso (copiada no inicio da batelada)]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[[0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000]]]>
+</Data>
+</Tag>
+<Tag Name="MX22_CAP_PROD_AT" TagType="Base" DataType="DINT" Dimensions="8" Radix="Decimal">
+<Description>
+<![CDATA[Capsula -> produto em uso]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[[0,0,0,0,0,0,0,0]]]>
+</Data>
+</Tag>
+<Tag Name="MX22_RCP_SEQ_AT" TagType="Base" DataType="DINT" Radix="Decimal">
+<Description>
+<![CDATA[Numero da receita em uso]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0]]>
+</Data>
+</Tag>
+<Tag Name="MX22_QUEDA" TagType="Base" DataType="REAL" Dimensions="8" Radix="Float">
+<Description>
+<![CDATA[Queda aprendida por produto (kg que caem apos fechar)]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[[0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000]]]>
+</Data>
+</Tag>
+<Tag Name="MX22_COMP" TagType="Base" DataType="REAL" Dimensions="8" Radix="Float">
+<Description>
+<![CDATA[Compensacao para a proxima batelada por produto (kg)]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[[0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000]]]>
+</Data>
+</Tag>
+<Tag Name="MX22_REAL" TagType="Base" DataType="REAL" Dimensions="8" Radix="Float">
+<Description>
+<![CDATA[Peso real de cada produto na batelada em curso (kg)]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[[0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000]]]>
+</Data>
+</Tag>
+<Tag Name="MX22_BAT_KG" TagType="Base" DataType="REAL" Dimensions="8" Radix="Float">
+<Description>
+<![CDATA[Peso real de cada produto na ultima batelada (kg)]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[[0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000,0.00000000e+000]]]>
+</Data>
+</Tag>
+<Tag Name="MX22_BAT_TOTAL" TagType="Base" DataType="REAL" Radix="Float">
+<Description>
+<![CDATA[Total da ultima batelada (kg)]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0.00000000e+00]]>
+</Data>
+</Tag>
+<Tag Name="MX22_BAT_SEQ" TagType="Base" DataType="DINT" Radix="Decimal">
+<Description>
+<![CDATA[Contador de bateladas concluidas]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0]]>
+</Data>
+</Tag>
+<Tag Name="MX22_BAT_RCP" TagType="Base" DataType="DINT" Radix="Decimal">
+<Description>
+<![CDATA[Receita usada na ultima batelada]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0]]>
+</Data>
+</Tag>
+<Tag Name="MX22_ACUM_KG" TagType="Base" DataType="DINT" Dimensions="8" Radix="Decimal">
+<Description>
+<![CDATA[Acumulado de kg por produto (nunca zera; servidor calcula diferencas)]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[[0,0,0,0,0,0,0,0]]]>
+</Data>
+</Tag>
+<Tag Name="MX22_ALM" TagType="Base" DataType="DINT" Radix="Decimal">
+<Description>
+<![CDATA[Alarmes: .0 tolerancia .1 capsula vazia .2 sem capsula .3 descarga demorada .4 sem receita .5 misturador desligado]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0]]>
+</Data>
+</Tag>
+<Tag Name="MX22_VAZIA" TagType="Base" DataType="DINT" Radix="Decimal">
+<Description>
+<![CDATA[Capsulas vazias: bit 1..4]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0]]>
+</Data>
+</Tag>
+<Tag Name="MX22_ALM_TOL_PROD" TagType="Base" DataType="DINT" Radix="Decimal">
+<Description>
+<![CDATA[Produtos fora da tolerancia: bit 1..4]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0]]>
+</Data>
+</Tag>
+<Tag Name="MX22_ABRE" TagType="Base" DataType="DINT" Radix="Decimal">
+<Description>
+<![CDATA[Comando interno: bit 1..4 capsulas, bit 5 descarga FG051]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0]]>
+</Data>
+</Tag>
+<Tag Name="MX22_ONS" TagType="Base" DataType="DINT" Radix="Decimal">
+<Description>
+<![CDATA[Bits de ONS da rotina]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0]]>
+</Data>
+</Tag>
+<Tag Name="MX22_RESET" TagType="Base" DataType="BOOL" Radix="Decimal">
+<Description>
+<![CDATA[Reconhecer alarmes / retomar (escrito pelo servidor)]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[0]]>
+</Data>
+</Tag>
+<Tag Name="MX22_TMR_VAZIA" TagType="Base" DataType="TIMER">
+<Description>
+<![CDATA[Janela de 20 s da capsula vazia]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[[0,20000,0]]]>
+</Data>
+</Tag>
+<Tag Name="MX22_TMR_EST" TagType="Base" DataType="TIMER">
+<Description>
+<![CDATA[Estabilizacao apos fechar (6 s)]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[[0,6000,0]]]>
+</Data>
+</Tag>
+<Tag Name="MX22_TMR_DESC" TagType="Base" DataType="TIMER">
+<Description>
+<![CDATA[Balanca vazia por 5 s = descarga completa]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[[0,5000,0]]]>
+</Data>
+</Tag>
+<Tag Name="MX22_TMR_DESC_MAX" TagType="Base" DataType="TIMER">
+<Description>
+<![CDATA[Descarga demorada (10 min)]]>
+</Description>
+<Data Format="L5K">
+<![CDATA[[0,600000,0]]]>
+</Data>
+</Tag>
+</Tags>
+<Programs Use="Context">
+<Program Use="Context" Name="MOAGEM_LINHA_502">
+<Routines Use="Context">
+<Routine Use="Target" Name="GR9_600MX022_DOSAGEM" Type="RLL">
+<Description>
+<![CDATA[Dosagem automatica do misturador 600MX022 (silo 7), habilitada pela seletora ED_600MX022_DOSAGEM]]>
+</Description>
+<RLLContent>
+<Rung Number="0" Type="N">
+<Comment>
+<![CDATA[DOSAGEM AUTOMATICA MISTURADOR 600MX022 - SILO 7 (gerado por clp/gerar_mx022.py, repositorio Gaya-apps).
+Seletora ED_600MX022_DOSAGEM habilita. Valvulas das capsulas e FG051 comandadas pelo bit .4 de V600FGxxx (igual a IHM).]]>
+</Comment>
+<Text>
+<![CDATA[XIC(ED_600MX022_DOSAGEM)OTE(MX22_AUTO);]]>
+</Text>
+</Rung>
+<Rung Number="1" Type="N">
+<Comment>
+<![CDATA[Peso da balanca (kg)]]>
+</Comment>
+<Text>
+<![CDATA[MOV(EA_600WF023_WT_U01_AJUSTE[9],MX22_PESO);]]>
+</Text>
+</Rung>
+<Rung Number="2" Type="N">
+<Comment>
+<![CDATA[Valores padrao se os tags vierem zerados (criados por CSV)]]>
+</Comment>
+<Text>
+<![CDATA[[LEQ(MX22_LOTE,0.0) MOV(1000.0,MX22_LOTE) ,LEQ(MX22_VAZIO,0.0) MOV(100.0,MX22_VAZIO) ];]]>
+</Text>
+</Rung>
+<Rung Number="3" Type="N">
+<Comment>
+<![CDATA[Seletora ligada: comeca do inicio (aguarda balanca vazia)]]>
+</Comment>
+<Text>
+<![CDATA[XIC(MX22_AUTO)ONS(MX22_ONS.0)[MOV(10,MX22_PASSO) ,MOV(0,MX22_PROD) ,MOV(0,MX22_CAP) ,MOV(0,MX22_ALM) ,MOV(0,MX22_VAZIA) ,MOV(0,MX22_ALM_TOL_PROD) ];]]>
+</Text>
+</Rung>
+<Rung Number="4" Type="N">
+<Comment>
+<![CDATA[Seletora desligada: fecha todas as valvulas (capsulas e descarga). O operador decide pelo comando manual.]]>
+</Comment>
+<Text>
+<![CDATA[XIO(MX22_AUTO)ONS(MX22_ONS.1)[OTU(V600FG044.4) ,OTU(V600FG038.4) ,OTU(V600FG040.4) ,OTU(V600FG039.4) ,OTU(V600FG051.4) ,MOV(0,MX22_ABRE) ,MOV(0,MX22_PASSO) ,MOV(0,MX22_CAP) ];]]>
+</Text>
+</Rung>
+<Rung Number="5" Type="N">
+<Comment>
+<![CDATA[Reconhecer alarmes (servidor escreve MX22_RESET=1). Em pausa por falta de capsula: retoma o produto.]]>
+</Comment>
+<Text>
+<![CDATA[XIC(MX22_RESET)EQU(MX22_PASSO,90)MOV(22,MX22_PASSO);]]>
+</Text>
+</Rung>
+<Rung Number="6" Type="N">
+<Text>
+<![CDATA[XIC(MX22_RESET)[MOV(0,MX22_ALM) ,MOV(0,MX22_VAZIA) ,MOV(0,MX22_ALM_TOL_PROD) ,OTU(MX22_RESET) ];]]>
+</Text>
+</Rung>
+<Rung Number="7" Type="N">
+<Comment>
+<![CDATA[Aviso: dosagem habilitada com o misturador desligado (as capsulas nao abrem)]]>
+</Comment>
+<Text>
+<![CDATA[XIC(MX22_AUTO)XIO(M600MX022.6)OTE(MX22_ALM.5);]]>
+</Text>
+</Rung>
+<Rung Number="8" Type="N">
+<Comment>
+<![CDATA[PASSO 10 - receita nova escrita pelo servidor entra so no inicio da batelada (zera a compensacao)]]>
+</Comment>
+<Text>
+<![CDATA[EQU(MX22_PASSO,10)NEQ(MX22_RCP_SEQ,MX22_RCP_SEQ_AT)[COP(MX22_PCT[0],MX22_PCT_ATIVO[0],8) ,COP(MX22_CAP_PROD[0],MX22_CAP_PROD_AT[0],8) ,FLL(0.0,MX22_COMP[0],8) ,MOV(MX22_RCP_SEQ,MX22_RCP_SEQ_AT) ];]]>
+</Text>
+</Rung>
+<Rung Number="9" Type="N">
+<Text>
+<![CDATA[CPT(MX22_SOMA,MX22_PCT_ATIVO[1]+MX22_PCT_ATIVO[2]+MX22_PCT_ATIVO[3]+MX22_PCT_ATIVO[4]);]]>
+</Text>
+</Rung>
+<Rung Number="10" Type="N">
+<Comment>
+<![CDATA[Sem receita valida]]>
+</Comment>
+<Text>
+<![CDATA[XIC(MX22_AUTO)LEQ(MX22_SOMA,0.0)OTE(MX22_ALM.4);]]>
+</Text>
+</Rung>
+<Rung Number="11" Type="N">
+<Comment>
+<![CDATA[PASSO 10 -> 20: misturador ligado, balanca vazia, FG051 fechada, receita valida]]>
+</Comment>
+<Text>
+<![CDATA[EQU(MX22_PASSO,10)XIC(M600MX022.6)LES(MX22_PESO,MX22_VAZIO)XIC(V600FG051.0)XIO(V600FG051.4)GRT(MX22_SOMA,0.0)[FLL(0.0,MX22_REAL[0],8) ,MOV(0,MX22_PROD) ,MOV(0,MX22_CAP) ,MOV(20,MX22_PASSO) ];]]>
+</Text>
+</Rung>
+<Rung Number="12" Type="N">
+<Comment>
+<![CDATA[PASSO 20 - proximo produto da receita]]>
+</Comment>
+<Text>
+<![CDATA[EQU(MX22_PASSO,20)ADD(MX22_PROD,1,MX22_PROD);]]>
+</Text>
+</Rung>
+<Rung Number="13" Type="N">
+<Comment>
+<![CDATA[Acabaram os produtos: descarga]]>
+</Comment>
+<Text>
+<![CDATA[EQU(MX22_PASSO,20)GRT(MX22_PROD,4)MOV(40,MX22_PASSO);]]>
+</Text>
+</Rung>
+<Rung Number="14" Type="N">
+<Comment>
+<![CDATA[Produto com percentual: alvo = pct x lote + compensacao da batelada anterior]]>
+</Comment>
+<Text>
+<![CDATA[EQU(MX22_PASSO,20)LEQ(MX22_PROD,4)GRT(MX22_PCT_ATIVO[MX22_PROD],0.0)[CPT(MX22_NOMINAL,MX22_PCT_ATIVO[MX22_PROD]*MX22_LOTE) ,CPT(MX22_LIM,MX22_NOMINAL*0.1) ,CPT(MX22_ALVO,MX22_NOMINAL+MX22_COMP[MX22_PROD]) ,MOV(MX22_PESO,MX22_P0) ,MOV(0,MX22_CAP) ,MOV(22,MX22_PASSO) ];]]>
+</Text>
+</Rung>
+<Rung Number="15" Type="N">
+<Comment>
+<![CDATA[PASSO 22 - escolhe a capsula do produto que nao esta vazia (7.1 e 7.2 / 7.3 e 7.4 com o mesmo produto)]]>
+</Comment>
+<Text>
+<![CDATA[EQU(MX22_PASSO,22)MOV(0,MX22_CAP);]]>
+</Text>
+</Rung>
+<Rung Number="16" Type="N">
+<Text>
+<![CDATA[EQU(MX22_PASSO,22)EQU(MX22_CAP,0)EQU(MX22_CAP_PROD_AT[1],MX22_PROD)XIO(MX22_VAZIA.1)MOV(1,MX22_CAP);]]>
+</Text>
+</Rung>
+<Rung Number="17" Type="N">
+<Text>
+<![CDATA[EQU(MX22_PASSO,22)EQU(MX22_CAP,0)EQU(MX22_CAP_PROD_AT[2],MX22_PROD)XIO(MX22_VAZIA.2)MOV(2,MX22_CAP);]]>
+</Text>
+</Rung>
+<Rung Number="18" Type="N">
+<Text>
+<![CDATA[EQU(MX22_PASSO,22)EQU(MX22_CAP,0)EQU(MX22_CAP_PROD_AT[3],MX22_PROD)XIO(MX22_VAZIA.3)MOV(3,MX22_CAP);]]>
+</Text>
+</Rung>
+<Rung Number="19" Type="N">
+<Text>
+<![CDATA[EQU(MX22_PASSO,22)EQU(MX22_CAP,0)EQU(MX22_CAP_PROD_AT[4],MX22_PROD)XIO(MX22_VAZIA.4)MOV(4,MX22_CAP);]]>
+</Text>
+</Rung>
+<Rung Number="20" Type="N">
+<Comment>
+<![CDATA[Capsula encontrada: comeca a dosar]]>
+</Comment>
+<Text>
+<![CDATA[EQU(MX22_PASSO,22)NEQ(MX22_CAP,0)[MOV(MX22_PESO,MX22_PREF) ,MOV(25,MX22_PASSO) ];]]>
+</Text>
+</Rung>
+<Rung Number="21" Type="N">
+<Comment>
+<![CDATA[Nenhuma capsula com o produto: pausa e alarma (operador abastece e reconhece)]]>
+</Comment>
+<Text>
+<![CDATA[EQU(MX22_PASSO,22)EQU(MX22_CAP,0)[OTL(MX22_ALM.2) ,MOV(90,MX22_PASSO) ];]]>
+</Text>
+</Rung>
+<Rung Number="22" Type="N">
+<Comment>
+<![CDATA[PASSO 25 - dosando]]>
+</Comment>
+<Text>
+<![CDATA[EQU(MX22_PASSO,25)CPT(MX22_DOSADO,MX22_PESO-MX22_P0);]]>
+</Text>
+</Rung>
+<Rung Number="23" Type="N">
+<Comment>
+<![CDATA[Chegou no alvo menos a queda aprendida: fecha]]>
+</Comment>
+<Text>
+<![CDATA[EQU(MX22_PASSO,25)CMP(MX22_DOSADO>=MX22_ALVO-MX22_QUEDA[MX22_PROD])[MOV(MX22_DOSADO,MX22_DOS_FECH) ,MOV(30,MX22_PASSO) ];]]>
+</Text>
+</Rung>
+<Rung Number="24" Type="N">
+<Comment>
+<![CDATA[Capsula vazia: janela de 20 s com o misturador ligado (o rele de campo alterna 5 s fluidizando / 5 s aberta)]]>
+</Comment>
+<Text>
+<![CDATA[EQU(MX22_PASSO,25)XIC(M600MX022.6)XIO(MX22_TMR_VAZIA.DN)TON(MX22_TMR_VAZIA,20000,0);]]>
+</Text>
+</Rung>
+<Rung Number="25" Type="N">
+<Text>
+<![CDATA[EQU(MX22_PASSO,25)XIC(MX22_TMR_VAZIA.DN)[CPT(MX22_DELTA,MX22_PESO-MX22_PREF) ,MOV(MX22_PESO,MX22_PREF) ];]]>
+</Text>
+</Rung>
+<Rung Number="26" Type="N">
+<Comment>
+<![CDATA[Ganhou menos de 10 kg em 20 s: marca vazia, alarma e passa para a outra capsula do mesmo produto]]>
+</Comment>
+<Text>
+<![CDATA[EQU(MX22_PASSO,25)XIC(MX22_TMR_VAZIA.DN)LES(MX22_DELTA,10.0)[OTL(MX22_VAZIA.[MX22_CAP]) ,OTL(MX22_ALM.1) ,MOV(22,MX22_PASSO) ];]]>
+</Text>
+</Rung>
+<Rung Number="27" Type="N">
+<Comment>
+<![CDATA[PASSO 30 - valvula fechada, espera estabilizar 6 s]]>
+</Comment>
+<Text>
+<![CDATA[EQU(MX22_PASSO,30)TON(MX22_TMR_EST,6000,0);]]>
+</Text>
+</Rung>
+<Rung Number="28" Type="N">
+<Comment>
+<![CDATA[Real do produto; queda aprendida (media); compensacao para a proxima batelada = alvo - real]]>
+</Comment>
+<Text>
+<![CDATA[EQU(MX22_PASSO,30)XIC(MX22_TMR_EST.DN)[CPT(MX22_REAL[MX22_PROD],MX22_PESO-MX22_P0) ,CPT(MX22_QUEDA[MX22_PROD],(MX22_QUEDA[MX22_PROD]+MX22_REAL[MX22_PROD]-MX22_DOS_FECH)/2.0) ,CPT(MX22_COMP[MX22_PROD],MX22_ALVO-MX22_REAL[MX22_PROD]) ];]]>
+</Text>
+</Rung>
+<Rung Number="29" Type="N">
+<Comment>
+<![CDATA[Limites: queda 0..200 kg, compensacao +/-10% do nominal]]>
+</Comment>
+<Text>
+<![CDATA[EQU(MX22_PASSO,30)XIC(MX22_TMR_EST.DN)[LES(MX22_QUEDA[MX22_PROD],0.0) MOV(0.0,MX22_QUEDA[MX22_PROD]) ,GRT(MX22_QUEDA[MX22_PROD],200.0) MOV(200.0,MX22_QUEDA[MX22_PROD]) ,GRT(MX22_COMP[MX22_PROD],MX22_LIM) MOV(MX22_LIM,MX22_COMP[MX22_PROD]) ,CMP(MX22_COMP[MX22_PROD]<0.0-MX22_LIM) CPT(MX22_COMP[MX22_PROD],0.0-MX22_LIM) ];]]>
+</Text>
+</Rung>
+<Rung Number="30" Type="N">
+<Comment>
+<![CDATA[Tolerancia de 10%: alarma e segue]]>
+</Comment>
+<Text>
+<![CDATA[EQU(MX22_PASSO,30)XIC(MX22_TMR_EST.DN)CMP(ABS(MX22_REAL[MX22_PROD]-MX22_ALVO)>MX22_LIM)[OTL(MX22_ALM.0) ,OTL(MX22_ALM_TOL_PROD.[MX22_PROD]) ];]]>
+</Text>
+</Rung>
+<Rung Number="31" Type="N">
+<Comment>
+<![CDATA[Proximo produto]]>
+</Comment>
+<Text>
+<![CDATA[EQU(MX22_PASSO,30)XIC(MX22_TMR_EST.DN)MOV(20,MX22_PASSO);]]>
+</Text>
+</Rung>
+<Rung Number="32" Type="N">
+<Comment>
+<![CDATA[PASSO 40 - descarga automatica pela FG051 ate a balanca ficar abaixo de MX22_VAZIO por 5 s]]>
+</Comment>
+<Text>
+<![CDATA[EQU(MX22_PASSO,40)LES(MX22_PESO,MX22_VAZIO)TON(MX22_TMR_DESC,5000,0);]]>
+</Text>
+</Rung>
+<Rung Number="33" Type="N">
+<Text>
+<![CDATA[EQU(MX22_PASSO,40)XIC(MX22_TMR_DESC.DN)MOV(45,MX22_PASSO);]]>
+</Text>
+</Rung>
+<Rung Number="34" Type="N">
+<Comment>
+<![CDATA[Descarga demorando mais de 10 min (ex.: tromba nao pronta): alarma e continua esperando]]>
+</Comment>
+<Text>
+<![CDATA[EQU(MX22_PASSO,40)TON(MX22_TMR_DESC_MAX,600000,0)XIC(MX22_TMR_DESC_MAX.DN)OTL(MX22_ALM.3);]]>
+</Text>
+</Rung>
+<Rung Number="35" Type="N">
+<Comment>
+<![CDATA[PASSO 45 - registra a batelada (o servidor le MX22_BAT_SEQ e MX22_ACUM_KG) e recomeca]]>
+</Comment>
+<Text>
+<![CDATA[EQU(MX22_PASSO,45)[COP(MX22_REAL[0],MX22_BAT_KG[0],8) ,CPT(MX22_BAT_TOTAL,MX22_REAL[1]+MX22_REAL[2]+MX22_REAL[3]+MX22_REAL[4]) ,ADD(MX22_ACUM_KG[1],MX22_REAL[1],MX22_ACUM_KG[1]) ,ADD(MX22_ACUM_KG[2],MX22_REAL[2],MX22_ACUM_KG[2]) ,ADD(MX22_ACUM_KG[3],MX22_REAL[3],MX22_ACUM_KG[3]) ,ADD(MX22_ACUM_KG[4],MX22_REAL[4],MX22_ACUM_KG[4]) ,MOV(MX22_RCP_SEQ_AT,MX22_BAT_RCP) ,ADD(MX22_BAT_SEQ,1,MX22_BAT_SEQ) ,MOV(10,MX22_PASSO) ];]]>
+</Text>
+</Rung>
+<Rung Number="36" Type="N">
+<Comment>
+<![CDATA[COMANDO DAS VALVULAS - so com a dosagem automatica ativa. Abre = V600FGxxx.4 (mesmo bit da IHM).]]>
+</Comment>
+<Text>
+<![CDATA[MOV(0,MX22_ABRE);]]>
+</Text>
+</Rung>
+<Rung Number="37" Type="N">
+<Comment>
+<![CDATA[Capsula 7.1 - 600FG044]]>
+</Comment>
+<Text>
+<![CDATA[XIC(MX22_AUTO)EQU(MX22_PASSO,25)EQU(MX22_CAP,1)OTL(MX22_ABRE.1);]]>
+</Text>
+</Rung>
+<Rung Number="38" Type="N">
+<Text>
+<![CDATA[XIC(MX22_AUTO)[XIC(MX22_ABRE.1) OTL(V600FG044.4) OTU(V600FG044.6) ,XIO(MX22_ABRE.1) OTU(V600FG044.4) ];]]>
+</Text>
+</Rung>
+<Rung Number="39" Type="N">
+<Comment>
+<![CDATA[Capsula 7.2 - 600FG038]]>
+</Comment>
+<Text>
+<![CDATA[XIC(MX22_AUTO)EQU(MX22_PASSO,25)EQU(MX22_CAP,2)OTL(MX22_ABRE.2);]]>
+</Text>
+</Rung>
+<Rung Number="40" Type="N">
+<Text>
+<![CDATA[XIC(MX22_AUTO)[XIC(MX22_ABRE.2) OTL(V600FG038.4) OTU(V600FG038.6) ,XIO(MX22_ABRE.2) OTU(V600FG038.4) ];]]>
+</Text>
+</Rung>
+<Rung Number="41" Type="N">
+<Comment>
+<![CDATA[Capsula 7.3 - 600FG040]]>
+</Comment>
+<Text>
+<![CDATA[XIC(MX22_AUTO)EQU(MX22_PASSO,25)EQU(MX22_CAP,3)OTL(MX22_ABRE.3);]]>
+</Text>
+</Rung>
+<Rung Number="42" Type="N">
+<Text>
+<![CDATA[XIC(MX22_AUTO)[XIC(MX22_ABRE.3) OTL(V600FG040.4) OTU(V600FG040.6) ,XIO(MX22_ABRE.3) OTU(V600FG040.4) ];]]>
+</Text>
+</Rung>
+<Rung Number="43" Type="N">
+<Comment>
+<![CDATA[Capsula 7.4 - 600FG039]]>
+</Comment>
+<Text>
+<![CDATA[XIC(MX22_AUTO)EQU(MX22_PASSO,25)EQU(MX22_CAP,4)OTL(MX22_ABRE.4);]]>
+</Text>
+</Rung>
+<Rung Number="44" Type="N">
+<Text>
+<![CDATA[XIC(MX22_AUTO)[XIC(MX22_ABRE.4) OTL(V600FG039.4) OTU(V600FG039.6) ,XIO(MX22_ABRE.4) OTU(V600FG039.4) ];]]>
+</Text>
+</Rung>
+<Rung Number="45" Type="N">
+<Comment>
+<![CDATA[Descarga 600FG051 (continua valendo a logica atual da GR9_600FG051: tromba 600TC002)]]>
+</Comment>
+<Text>
+<![CDATA[XIC(MX22_AUTO)EQU(MX22_PASSO,40)OTL(MX22_ABRE.5);]]>
+</Text>
+</Rung>
+<Rung Number="46" Type="N">
+<Text>
+<![CDATA[XIC(MX22_AUTO)[XIC(MX22_ABRE.5) OTL(V600FG051.4) OTU(V600FG051.6) ,XIO(MX22_ABRE.5) OTU(V600FG051.4) ];]]>
+</Text>
+</Rung>
+</RLLContent>
+</Routine>
+</Routines>
+</Program>
+</Programs>
+</Controller>
+</RSLogix5000Content>

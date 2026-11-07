@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Misturador 600MX022</title>
 <!--
-  Tela de acompanhamento do misturador 600MX022 (silo 7) — SOMENTE LEITURA.
-  Dados: GET /api/misturador (misturador.js), atualizado a cada 2 s.
-  Único "comando": editar o nome do material de cada cápsula (não vai ao CLP;
-  fica em misturador_config.json no servidor), com o PIN das receitas.
+  Misturador 600MX022 (silo 7). Dados: GET /api/misturador (misturador.js), a cada 2 s.
+  Escritas (PIN das receitas + operador): materiais das cápsulas (só no servidor),
+  receita da dosagem automática (grava MX22_PCT/MX22_CAP_PROD no CLP — vale a partir
+  da próxima batelada) e "reconhecer alarmes" (MX22_RESET). Não comanda válvulas.
 -->
 <style>
   :root{
@@ -86,11 +86,21 @@
   .b{background:var(--accent); color:#fff; border:none; padding:11px; border-radius:10px; font-weight:700; font-size:14px; cursor:pointer;}
   .b.sec2{background:var(--card); color:var(--txt); border:1px solid var(--card-b);}
   #m-err{color:var(--bad); font-size:12px; min-height:16px; margin-top:6px;}
+  .prog{height:10px; background:#0b1220; border:1px solid var(--card-b); border-radius:6px; overflow:hidden; margin-top:6px;}
+  .prog .f{height:100%; background:linear-gradient(90deg,#16a34a,#22c55e); transition:width .6s;}
+  .alm{border-radius:10px; padding:9px 12px; font-size:13px; margin-top:8px; background:#2e1414; color:#fca5a5; display:flex; justify-content:space-between; gap:8px; align-items:center;}
+  .comp{display:flex; justify-content:space-between; padding:6px 0; border-top:1px dashed var(--card-b); font-size:13.5px;}
+  .comp:first-child{border-top:none;}
+  select.inp{text-transform:none; font-size:14px;}
+  .tbl{width:100%; border-collapse:collapse; font-size:12.5px;}
+  .tbl td,.tbl th{padding:6px 4px; border-bottom:1px dashed var(--card-b); text-align:right;}
+  .tbl th{color:var(--txt-dim); font-weight:600; font-size:10.5px; text-transform:uppercase;}
+  .tbl td:first-child,.tbl th:first-child{text-align:left;}
 </style>
 </head>
 <body>
 <header>
-  <h1>Misturador 600MX022<span>Silo 7 · somente leitura</span></h1>
+  <h1>Misturador 600MX022<span>Silo 7 · dosagem automática</span></h1>
   <a class="btn-l" href="mobile-status.html">← Status</a>
   <div id="conn" class="conn-bad"><span class="dot"></span>conectando…</div>
 </header>
@@ -112,29 +122,38 @@
     <div class="bar-legenda"><span>Capacidade da balança</span><span id="bar-cap-max">6.000 kg</span></div>
   </div>
 
+  <div class="sec"><span>Dosagem automática</span></div>
+  <div class="card" id="dosagem"></div>
+  <div id="alarmes"></div>
+
   <div class="sec"><span>Silo 7 — cápsulas</span><button class="btn-l" id="btn-mat">✏️ Materiais</button></div>
   <div class="silo" id="silo"></div>
   <div class="seta">▼ ▼ ▼ ▼</div>
 
-  <div class="sec"><span>Misturador / balança 600MX022</span></div>
+  <div class="sec"><span>Misturador / descarga</span></div>
   <div class="card">
-    <div class="linha"><span>Estado</span><span id="mx-estado"></span></div>
+    <div class="linha"><span>600MX022</span><span id="mx-estado"></span></div>
+    <div id="descargas"></div>
     <div class="vals">
       <div class="val"><div class="l">Velocidade</div><div class="v" id="mx-hz">—</div></div>
       <div class="val"><div class="l">Corrente</div><div class="v" id="mx-a">—</div></div>
     </div>
   </div>
 
-  <div class="sec"><span>Descarga</span></div>
-  <div class="card" id="descargas"></div>
+  <div class="sec"><span>Receita da dosagem</span><button class="btn-l" id="btn-rec">🧪 Trocar receita</button></div>
+  <div class="card" id="receita"></div>
+
+  <div class="sec"><span>Hoje</span><a class="btn-l" href="#" id="btn-hist">📅 45 dias</a></div>
+  <div class="card" id="hoje"></div>
   <div id="aviso"></div>
   <div class="ts" id="ts"></div>
 </main>
 
 <div class="ov" id="ov">
   <div class="box">
-    <h2>Material de cada cápsula</h2>
+    <h2 id="m-tit"></h2>
     <div id="m-campos"></div>
+    <input class="inp" type="text" id="m-user" placeholder="Operador" maxlength="60" style="text-transform:none;margin-bottom:8px">
     <input class="inp" type="password" id="m-pin" placeholder="PIN" inputmode="numeric" style="text-transform:none">
     <div id="m-err"></div>
     <div class="row"><button class="b sec2" id="m-cancel">Cancelar</button><button class="b" id="m-ok">Salvar</button></div>
@@ -144,31 +163,33 @@
 <script>
 (function(){
   'use strict';
-  var dados = null, timer = null, desde = {};
+  var dados = null, timer = null, desde = {}, acaoModal = null;
+  var USER_KEY = 'receitas_operador';
   function $(id){ return document.getElementById(id); }
   function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
   function kg(v){ return Math.round(Number(v) || 0).toLocaleString('pt-BR'); }
   function num(v, c){ return v == null ? '—' : Number(v).toLocaleString('pt-BR', { minimumFractionDigits: c, maximumFractionDigits: c }); }
   function pill(cls, t){ return '<span class="pill ' + cls + '">' + t + '</span>'; }
+  function rotulo(chave){ var m = ((dados && dados.materiais) || []).find(function(x){ return x.chave === chave; }); return m ? m.rotulo : chave; }
 
-  function pillValvula(v){
+  // Cápsulas: o relé de campo alterna 5 s fluidizando / 5 s aberta enquanto o CLP manda abrir
+  function pillCapsula(v){
+    if (!v || v.erro) return pill('p-bad', 'SEM LEITURA');
+    if (v.comandoAbrir) return v.aberta ? pill('p-on', '● ABERTA') : pill('p-on', '◐ FLUIDIZANDO');
+    if (v.aberta) return pill('p-warn', '◐ FECHANDO');
+    return v.fechada ? pill('p-off', '○ FECHADA') : pill('p-warn', 'SEM POSIÇÃO');
+  }
+  function pillDescarga(v){
     if (!v || v.erro) return pill('p-bad', 'SEM LEITURA');
     if (v.aberta && v.comandoAbrir) return pill('p-on', '● ABERTA');
     if (v.fechada && !v.comandoAbrir) return pill('p-off', '○ FECHADA');
-    if (v.comandoAbrir && !v.aberta) return pill('p-warn', '◐ ABRINDO');
-    if (!v.comandoAbrir && v.aberta) return pill('p-warn', '◐ FECHANDO');
-    return pill('p-warn', 'SEM POSIÇÃO');
+    return v.comandoAbrir ? pill('p-warn', '◐ ABRINDO') : pill('p-warn', '◐ FECHANDO');
   }
 
   async function ler(){
     clearTimeout(timer);
-    try {
-      var r = await fetch('/api/misturador', { cache: 'no-store' });
-      dados = await r.json();
-      render();
-    } catch(e) {
-      $('conn').className = 'conn-bad'; $('conn').innerHTML = '<span class="dot"></span>sem servidor';
-    }
+    try { var r = await fetch('/api/misturador', { cache: 'no-store' }); dados = await r.json(); render(); }
+    catch(e) { $('conn').className = 'conn-bad'; $('conn').innerHTML = '<span class="dot"></span>sem servidor'; }
     timer = setTimeout(ler, 2000);
   }
 
@@ -178,73 +199,158 @@
     $('conn').className = velho ? 'conn-bad' : 'conn-ok';
     $('conn').innerHTML = '<span class="dot"></span>' + (!e ? 'aguardando CLP' : velho ? 'dados parados' : 'CLP');
 
-    var bat = (dados && dados.batelada) || 1000, cap = (dados && dados.balancaMax) || 6000;
-    $('bat-meta').textContent = kg(bat) + ' kg';
-    $('bar-bat-max').textContent = kg(bat) + ' kg';
-    $('bar-cap-max').textContent = kg(cap) + ' kg';
-    var peso = e ? e.peso : null;
+    // Balança
+    var bat = dados.batelada || 1000, cap = dados.balancaMax || 6000, peso = e ? e.peso : null;
+    $('bat-meta').textContent = kg(bat) + ' kg'; $('bar-bat-max').textContent = kg(bat) + ' kg'; $('bar-cap-max').textContent = kg(cap) + ' kg';
     $('peso').innerHTML = (peso == null ? '—' : kg(peso)) + '<small>kg</small>';
     var pct = peso == null ? 0 : Math.max(0, peso) / bat * 100;
-    var fb = $('bar-bat');
-    fb.style.width = Math.min(100, pct) + '%';
-    fb.className = 'f' + (pct > 102 ? ' acima' : pct >= 98 ? ' cheio' : '');
+    $('bar-bat').style.width = Math.min(100, pct) + '%';
+    $('bar-bat').className = 'f' + (pct > 110 ? ' acima' : pct >= 90 ? ' cheio' : '');
     $('bar-bat-pct').textContent = Math.round(pct) + '%';
-    $('bat-falta').textContent = peso == null ? '' : peso < bat ? 'faltam ' + kg(bat - peso) + ' kg' : peso > bat * 1.02 ? kg(peso - bat) + ' kg acima' : 'batelada completa';
+    $('bat-falta').textContent = peso == null ? '' : peso < bat ? 'faltam ' + kg(bat - peso) + ' kg' : 'batelada completa';
     $('bar-cap').style.width = (peso == null ? 0 : Math.min(100, Math.max(0, peso) / cap * 100)) + '%';
 
     var s = e && e.seletora;
-    $('seletora').innerHTML = !s || !s.configurada ? pill('p-off', 'SELETORA NÃO CONFIGURADA')
-      : s.habilitada == null ? pill('p-bad', 'SELETORA SEM LEITURA')
+    $('seletora').innerHTML = !s || !s.configurada ? pill('p-off', 'SELETORA SEM LEITURA')
       : s.habilitada ? pill('p-on', '● DOSAGEM HABILITADA') : pill('p-off', '○ DOSAGEM DESABILITADA');
 
-    var caps = (e && e.capsulas) || (dados && dados.capsulas) || [];
-    $('silo').innerHTML = caps.map(function(c){
-      var cls = c.aberta && c.comandoAbrir ? ' aberta' : (c.divergente || c.indefinida || c.erro) ? ' alerta' : '';
+    // Dosagem automática
+    var d = e && e.dosagem, caps = dados.capsulas || [];
+    if (!e) $('dosagem').innerHTML = '<div class="linha"><span style="color:var(--txt-dim)">Aguardando leitura do CLP…</span></div>';
+    else if (!d) $('dosagem').innerHTML = '<div class="linha"><span style="color:var(--txt-dim)">Rotina de dosagem ainda não instalada no CLP (tags MX22_*).</span></div>';
+    else {
+      var prodMat = '', rc = (dados.receitasClp || {})[d.rcpSeqAtivo];
+      if (rc && rc.produtos && d.produto) prodMat = rotulo(rc.produtos[d.produto] || '');
+      var capAtual = d.capsula ? caps[d.capsula - 1] : null;
+      var h = '<div class="linha"><span>Etapa</span><b>' + esc(d.passoTexto) + '</b></div>';
+      if (d.passo === 25 || d.passo === 30) {
+        var p = d.alvo > 0 ? Math.min(100, Math.max(0, d.dosado / d.alvo * 100)) : 0;
+        h += '<div class="linha"><span>Produto</span><b>' + esc(prodMat || ('Produto ' + d.produto)) + (capAtual ? ' · cápsula ' + esc(capAtual.id) : '') + '</b></div>' +
+          '<div style="font-size:13px;margin-top:4px">' + kg(d.dosado) + ' de ' + kg(d.alvo) + ' kg</div><div class="prog"><div class="f" style="width:' + p + '%"></div></div>';
+      }
+      h += '<div class="linha" style="margin-top:6px"><span>Bateladas concluídas (contador do CLP)</span><b>' + kg(d.batSeq) + '</b></div>';
+      $('dosagem').innerHTML = h;
+    }
+    var alms = (d && d.alarmes) || [];
+    $('alarmes').innerHTML = alms.length ? alms.map(function(a){
+      var extra = a.bit === 1 && d.capsulasVazias.length ? ': ' + d.capsulasVazias.join(', ') : '';
+      return '<div class="alm"><span>⚠ ' + esc(a.texto + extra) + '</span></div>';
+    }).join('') + '<div class="row"><button class="b sec2" id="btn-reset">Reconhecer alarmes</button></div>' : '';
+    if (alms.length) $('btn-reset').onclick = function(){ abrirModal('Reconhecer alarmes', '<div style="font-size:13px;margin-bottom:10px">Zera os alarmes no CLP. Em pausa por falta de cápsula, a dosagem retoma o produto.</div>', resetar); };
+
+    // Cápsulas
+    var est = (e && e.capsulas) || [];
+    $('silo').innerHTML = caps.map(function(c, i){
+      var v = est[i] || {};
+      var vazia = d && d.capsulasVazias.indexOf(c.id) >= 0;
+      var cls = v.comandoAbrir ? ' aberta' : vazia ? ' alerta' : '';
       return '<div class="caps' + cls + '"><div class="forma"><div class="corpo"></div><div class="cone"></div><div class="fluxo"></div></div>' +
         '<div class="num">Cápsula ' + esc(c.id) + '</div>' +
-        '<div class="mat' + (c.rotulo ? '' : ' vazio') + '">' + (c.rotulo ? esc(c.rotulo) : 'sem material') + '</div>' +
-        '<div class="fg">' + esc(c.fg) + '</div>' + (e ? pillValvula(c) : pill('p-off', '—')) + '</div>';
+        '<div class="mat' + (c.material ? '' : ' vazio') + '">' + (c.material ? esc(c.rotulo) : 'sem material') + '</div>' +
+        '<div class="fg">' + esc(c.fg) + '</div>' + (e ? pillCapsula(v) : pill('p-off', '—')) +
+        (vazia ? '<div style="margin-top:5px">' + pill('p-warn', 'VAZIA') + '</div>' : '') + '</div>';
     }).join('');
 
     var m = e && e.misturador;
-    $('mx-estado').innerHTML = !m ? pill('p-off', '—') : m.falha ? pill('p-bad', '⚠ FALHA / TRIP')
-      : m.ligado ? pill('p-on', '● LIGADO') : pill('p-off', '○ DESLIGADO') + (m.pronto ? ' ' + pill('p-off', 'PRONTO') : '');
+    $('mx-estado').innerHTML = !m ? pill('p-off', '—') : m.falha ? pill('p-bad', '⚠ FALHA / TRIP') : m.ligado ? pill('p-on', '● LIGADO') : pill('p-off', '○ DESLIGADO');
     $('mx-hz').innerHTML = m ? num(m.hz, 1) + ' <small style="font-size:12px;color:var(--txt-dim)">Hz</small>' : '—';
     $('mx-a').innerHTML = m ? num(m.a, 1) + ' <small style="font-size:12px;color:var(--txt-dim)">A</small>' : '—';
+    $('descargas').innerHTML = ((e && e.descargas) || []).map(function(v){ return '<div class="linha"><span>Descarga ' + esc(v.fg) + '</span>' + pillDescarga(v) + '</div>'; }).join('');
 
-    var d = (e && e.descargas) || [];
-    $('descargas').innerHTML = d.length ? d.map(function(v){ return '<div class="linha"><span>' + esc(v.fg) + '</span>' + pillValvula(v) + '</div>'; }).join('')
-      : '<div class="linha"><span style="color:var(--txt-dim)">Aguardando leitura…</span></div>';
+    // Receita
+    var rec = (dados.receitasMix || []).find(function(r){ return r.nome === dados.receitaAtual; });
+    var rh = '';
+    if (!dados.receitaAtual) rh = '<div class="linha"><span style="color:var(--txt-dim)">Nenhuma receita gravada no CLP por esta tela.</span></div>';
+    else {
+      rh = '<div class="linha"><span>Receita</span><b>' + esc(dados.receitaAtual) + '</b></div>';
+      if (rec) Object.keys(rec.mps).forEach(function(mat){
+        var cs = caps.filter(function(c){ return c.material === mat; }).map(function(c){ return c.id; });
+        rh += '<div class="comp"><span>' + esc(rotulo(mat)) + ' <small style="color:var(--txt-dim)">' + (cs.length ? 'cápsulas ' + cs.join(' / ') : 'sem cápsula!') + '</small></span><b>' + num(rec.mps[mat] * 100, 1) + '%</b></div>';
+      });
+      if (d && d.rcpSeq !== d.rcpSeqAtivo) rh += '<div class="aviso" style="margin-top:8px">Receita nova gravada — entra no início da próxima batelada.</div>';
+    }
+    $('receita').innerHTML = rh;
 
-    // Só avisa se a válvula ficar sem confirmação de posição por mais de 15 s (abrir/fechar leva alguns segundos)
+    // Hoje
+    var hj = dados.hoje;
+    var hh = '<div class="vals" style="margin-top:0"><div class="val"><div class="l">Bateladas</div><div class="v">' + (hj ? kg(hj.bateladas) : '0') + '</div></div>' +
+      '<div class="val"><div class="l">Pozomix MIX</div><div class="v">' + (hj ? num(hj.totalKg / 1000, 2) : '0') + ' <small style="font-size:12px;color:var(--txt-dim)">t</small></div></div></div>';
+    if (hj) Object.keys(hj.kg).forEach(function(mat){ hh += '<div class="comp"><span>' + esc(rotulo(mat)) + '</span><b>' + num(hj.kg[mat] / 1000, 2) + ' t</b></div>'; });
+    hh += '<div style="font-size:11px;color:var(--txt-dim);margin-top:8px">Vai automaticamente para o app Cimento Gaúcho (aba Saídas, Pozomix 7510 MIX) e baixa as cinzas do estoque pelo peso real.</div>';
+    $('hoje').innerHTML = hh;
+
+    // Válvula comandada fechada mas com fim de curso de aberta por mais de 15 s
     var agoraMs = Date.now();
-    caps.forEach(function(c){ if (e && (c.divergente || c.indefinida)) { if (!desde[c.fg]) desde[c.fg] = agoraMs; } else delete desde[c.fg]; });
-    var alertas = caps.filter(function(c){ return desde[c.fg] && agoraMs - desde[c.fg] > 15000; }).map(function(c){ return c.fg; });
-    $('aviso').innerHTML = alertas.length ? '<div class="aviso">Válvula sem confirmação de posição: ' + alertas.join(', ') + '. Se persistir, confira o fim de curso.</div>' : '';
+    est.concat((e && e.descargas) || []).forEach(function(v){ var ruim = !v.comandoAbrir && v.aberta; if (ruim) { if (!desde[v.fg]) desde[v.fg] = agoraMs; } else delete desde[v.fg]; });
+    var al = Object.keys(desde).filter(function(fg){ return agoraMs - desde[fg] > 15000; });
+    $('aviso').innerHTML = al.length ? '<div class="aviso">Válvula aberta sem comando: ' + al.join(', ') + '. Confira o fim de curso ou o comando manual.</div>' : '';
     $('ts').textContent = e ? 'Leitura do CLP às ' + new Date(e.ts).toLocaleTimeString('pt-BR') : 'O servidor começa a ler o CLP quando esta tela é aberta — aguarde alguns segundos.';
   }
 
-  // ── Materiais das cápsulas ──
-  $('btn-mat').addEventListener('click', function(){
-    var caps = (dados && dados.capsulas) || [];
-    $('m-campos').innerHTML = caps.map(function(c){
-      return '<div class="fr"><span>' + esc(c.id) + '</span><input class="inp" maxlength="20" data-id="' + esc(c.id) + '" value="' + esc(c.rotulo) + '" placeholder="ex.: CINZA AMBAR"></div>';
-    }).join('');
-    $('m-err').textContent = ''; $('ov').classList.add('open');
-  });
+  // ── Modal com operador + PIN ──
+  function abrirModal(tit, html, acao){
+    $('m-tit').textContent = tit; $('m-campos').innerHTML = html; $('m-err').textContent = '';
+    try { $('m-user').value = $('m-user').value || localStorage.getItem(USER_KEY) || ''; } catch(e){}
+    acaoModal = acao; $('ov').classList.add('open');
+  }
   $('m-cancel').addEventListener('click', function(){ $('ov').classList.remove('open'); });
   $('m-ok').addEventListener('click', async function(){
-    var rot = {};
-    document.querySelectorAll('#m-campos input').forEach(function(i){ rot[i.dataset.id] = i.value.trim(); });
-    $('m-ok').disabled = true;
+    if (!$('m-user').value.trim()){ $('m-err').textContent = 'Informe o operador.'; return; }
+    $('m-ok').disabled = true; $('m-err').textContent = 'Enviando…';
+    try { localStorage.setItem(USER_KEY, $('m-user').value.trim()); } catch(e){}
     try {
-      var r = await fetch('/api/misturador/rotulos', { method: 'POST', headers: { 'content-type': 'application/json', 'x-receitas-pin': $('m-pin').value },
-        body: JSON.stringify({ rotulos: rot }) });
+      var r = await acaoModal();
       var j = await r.json();
-      if (r.ok){ $('ov').classList.remove('open'); $('m-pin').value = ''; ler(); }
+      if (r.ok){ $('ov').classList.remove('open'); $('m-pin').value = ''; ler(); if (j.mensagem) alert(j.mensagem); }
       else $('m-err').textContent = j.mensagem || ('Erro ' + r.status);
     } catch(e){ $('m-err').textContent = 'Sem conexão com o servidor.'; }
     $('m-ok').disabled = false;
+  });
+  function post(url, corpo){
+    corpo.usuario = $('m-user').value.trim();
+    return fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-receitas-pin': $('m-pin').value }, body: JSON.stringify(corpo) });
+  }
+  function resetar(){ return post('/api/misturador/reset', {}); }
+
+  $('btn-mat').addEventListener('click', function(){
+    var mats = (dados && dados.materiais) || [];
+    var h = (dados.capsulas || []).map(function(c){
+      return '<div class="fr"><span>' + esc(c.id) + '</span><select class="inp" data-id="' + esc(c.id) + '"><option value="">— sem material —</option>' +
+        mats.map(function(m){ return '<option value="' + esc(m.chave) + '"' + (m.chave === c.material ? ' selected' : '') + '>' + esc(m.rotulo) + '</option>'; }).join('') + '</select></div>';
+    }).join('') + '<div style="font-size:12px;color:var(--txt-dim);margin-bottom:10px">Cápsulas com o mesmo material são usadas uma após a outra quando uma esvazia. Depois de mudar, aplique a receita de novo.</div>';
+    abrirModal('Material de cada cápsula', h, function(){
+      var cs = {}; document.querySelectorAll('#m-campos select').forEach(function(s){ cs[s.dataset.id] = s.value; });
+      return post('/api/misturador/capsulas', { capsulas: cs });
+    });
+  });
+
+  $('btn-rec').addEventListener('click', function(){
+    var rs = (dados && dados.receitasMix) || [];
+    if (!rs.length){ alert('Nenhuma receita de mistura no app. Cadastre no app Cimento Gaúcho (aba Receitas, marcando "misturador").'); return; }
+    var h = '<select class="inp" id="m-rec" style="margin-bottom:8px">' + rs.map(function(r){
+      return '<option value="' + esc(r.nome) + '"' + (r.nome === dados.receitaAtual ? ' selected' : '') + '>' + esc(r.nome) + '</option>'; }).join('') + '</select><div id="m-rec-det" style="margin-bottom:10px"></div>';
+    abrirModal('Receita da dosagem automática', h, function(){ return post('/api/misturador/receita', { receita: $('m-rec').value }); });
+    function det(){
+      var r = rs.find(function(x){ return x.nome === $('m-rec').value; });
+      $('m-rec-det').innerHTML = r ? Object.keys(r.mps).map(function(m){ return '<div class="comp"><span>' + esc(rotulo(m)) + '</span><b>' + num(r.mps[m] * 100, 1) + '% · ' + kg(r.mps[m] * (dados.batelada || 1000)) + ' kg</b></div>'; }).join('') +
+        '<div style="font-size:12px;color:var(--txt-dim);margin-top:6px">Grava no CLP; entra no início da próxima batelada.</div>' : '';
+    }
+    $('m-rec').addEventListener('change', det); det();
+  });
+
+  $('btn-hist').addEventListener('click', async function(ev){
+    ev.preventDefault();
+    try {
+      var j = await (await fetch('/api/misturador/historico', { cache: 'no-store' })).json();
+      var h = '<table class="tbl"><tr><th>Dia</th><th>Bat.</th><th>t</th><th>Receita</th></tr>' + (j.dias || []).map(function(d){
+        var p = d.data.split('-'); return '<tr><td>' + p[2] + '/' + p[1] + '</td><td>' + d.bateladas + '</td><td>' + num(d.totalKg / 1000, 2) + '</td><td>' + esc(d.receita || '—') + '</td></tr>';
+      }).join('') + '</table>';
+      $('m-tit').textContent = 'Últimos 45 dias'; $('m-campos').innerHTML = (j.dias || []).length ? h : '<div style="color:var(--txt-dim)">Sem bateladas registradas.</div>';
+      $('ov').classList.add('open'); acaoModal = null;
+      $('m-user').style.display = $('m-pin').style.display = $('m-ok').style.display = 'none';
+      $('m-cancel').textContent = 'Fechar';
+      $('m-cancel').onclick = function(){ $('m-user').style.display = $('m-pin').style.display = $('m-ok').style.display = ''; $('m-cancel').textContent = 'Cancelar'; };
+    } catch(e){}
   });
 
   ler();

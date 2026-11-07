@@ -446,7 +446,8 @@ const receitas = criarReceitas({
 app.use(receitas.router);
 
 // Misturador 600MX022 — tela de acompanhamento, só leitura (ver misturador.js)
-const misturador = criarMisturador({ Tag, dir: __dirname, pinConfere: criarReceitas.pinConfere, ipConfiavel: criarReceitas.ipConfiavel });
+const misturador = criarMisturador({ Tag, dir: __dirname, pinConfere: criarReceitas.pinConfere, ipConfiavel: criarReceitas.ipConfiavel,
+  getPayload: (fresco) => getPayloadFirestore(!!fresco) });
 app.use(misturador.router);
 
 function broadcast(data) {
@@ -938,7 +939,8 @@ app.get('/api/boletim/detalhe', async (req, res) => {
     // Pozomix 7510 MIX (misturador 600MX022): expedido × receita da mistura do dia
     const rs = pega(mes.saidas);
     if (rs && N(rs.pozo7510mix) > 0) {
-      const c = calcMps(N(rs.pozo7510mix), receitasApp.find(x => x.produto === rs.receitaMix));
+      const c = rs.mixConsumo && typeof rs.mixConsumo === 'object' ? { ...rs.mixConsumo } // pesado pelo CLP
+        : calcMps(N(rs.pozo7510mix), receitasApp.find(x => x.produto === rs.receitaMix));
       Object.keys(c).forEach(n => { if (c[n]) tot[n] = (tot[n] || 0) + c[n]; });
     }
     if (Object.keys(tot).length) { consDias.push({ data: dataDia, tot }); Object.keys(tot).forEach(n => usadas.add(n)); }
@@ -1358,6 +1360,10 @@ async function sincronizarBoletimFirebase() {
         }
       }
     }
+
+    // 4) Pozomix 7510 MIX pesado pelo misturador 600MX022 (aba Saídas) — ver misturador.js
+    const mixDias = misturador.aplicarNoPayload(payload);
+    if (mixDias.length) { algumaCoisaMudou = true; console.log('[SYNC] Pozomix MIX (misturador):\n  ' + mixDias.join('\n  ')); }
 
     if (!algumaCoisaMudou) { console.log('[SYNC] Nada a atualizar neste ciclo.'); return; }
 
@@ -2916,7 +2922,7 @@ async function iniciarEthernetIP() {
           try {
             await receitas.processarFila(PLC); // operações de receita, sem concorrência com a leitura
             const { ok, erros } = await lerTodosOsTags(PLC);
-            await receitas.exclusivo(() => misturador.lerCiclo(PLC), 3000); // só lê com a tela aberta
+            await receitas.exclusivo(() => misturador.lerCiclo(PLC), 3000); // bateladas sempre; tela só aberta
             // Mesma auto-cura que o server-pa2.js já tinha: se o ciclo inteiro
             // vier com 0 leituras OK, a sessão CIP morreu silenciosamente
             // (cada tag individual só dá timeout, sem lançar exceção — por

@@ -14,6 +14,7 @@ backups_payload/
 receitas_presets.json
 receitas_log.jsonl
 misturador_config.json
+misturador_bateladas.json
 *.tmp
 
 # Dependências e arquivos locais

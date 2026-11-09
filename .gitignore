@@ -22,3 +22,4 @@ node_modules/
 *.log
 *.bak*
 server.js.bak*
+__pycache__/

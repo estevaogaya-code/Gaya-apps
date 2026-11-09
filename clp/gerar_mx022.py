@@ -209,7 +209,9 @@ def gerar_csv():
 
 
 if __name__ == '__main__':
-    for nome, conteudo in [(f'{ROTINA}.L5X', gerar_l5x()), (f'{ROTINA}_rungs.txt', gerar_txt()), ('MX22_tags.CSV', gerar_csv())]:
+    colar = '\r\n'.join(t for c, t in R) + '\r\n'   # 1 rung por linha, sem comentários (colar no editor)
+    for nome, conteudo in [(f'{ROTINA}.L5X', gerar_l5x()), (f'{ROTINA}_rungs.txt', gerar_txt()), ('MX22_tags.CSV', gerar_csv()),
+                           (f'{ROTINA}_colar.txt', colar)]:
         with open(os.path.join(AQUI, nome), 'w', encoding='utf-8', newline='') as f:
             f.write(conteudo)
         print('gerado', nome)

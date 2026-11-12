@@ -11,6 +11,10 @@
     GET  /api/comandos/:linha               estado do Grupo 5, moinho e bombas
     POST /api/comandos/:linha/grupo5        { acao: ligar|desligar } (PIN)
     POST /api/comandos/:linha/parar-moinho  { confirmacao: 'PARAR' }  (PIN)
+    POST /api/comandos/:linha/exaustor      { acao: ligar|desligar|velocidade, hz } (PIN)
+  Exaustor 50xFN042: ligar com Grupo 6 selecionado em REMOTO, sem intertravamento e inversor
+  pronto; desligar só com o moinho parado; velocidade 30–55 Hz, bloqueada quando o PID da
+  alimentação automática (ou o couching do 501) está comandando a referência.
   Regras (no servidor): ligar só com o grupo selecionado, em REMOTO e sem
   intertravamento; desligar só com o moinho (BM140) e o BM141 parados.
   Parar o moinho NÃO é parada de emergência de segurança (não substitui botão
@@ -152,6 +156,16 @@
   .grande{width:100%; padding:16px; font-size:16px; border-radius:12px; margin-top:10px;}
   .btn.ok{background:var(--ok); color:#06210f;}
   .btn.emerg{background:#b91c1c; font-size:17px; letter-spacing:.5px;}
+  .vals{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:10px;}
+  .val{background:#0f1729; border:1px solid var(--card-b); border-radius:10px; padding:8px 10px;}
+  .val .l{font-size:10.5px; color:var(--txt-dim); text-transform:uppercase; letter-spacing:.4px;}
+  .val .v{font-size:19px; font-weight:800; font-variant-numeric:tabular-nums;}
+  .val .v small{font-size:11px; color:var(--txt-dim); font-weight:600;}
+  .vel{display:grid; grid-template-columns:44px 1fr 44px 96px; gap:6px; align-items:center; margin-top:10px;}
+  .vel .inp{text-align:center; font-weight:800; font-size:18px; padding:9px 6px;}
+  .vel .inp.mudou{border-color:var(--warn);}
+  .vel .btn{padding:10px 0;}
+  button.btn:disabled{background:var(--off); color:var(--txt-dim); border-color:var(--off); cursor:not-allowed; opacity:.55;}
 </style>
 </head>
 <body>
@@ -159,7 +173,7 @@
 <div id="lock-screen">
   <div class="lock-icon">⚙️</div>
   <h1>Comandos — Moinhos 501 / 502</h1>
-  <p>Grupo 5 (bombas hidráulicas) e parada do moinho. Mesmo PIN da tela de receitas.</p>
+  <p>Grupo 5 (bombas hidráulicas), exaustor FN042 e parada do moinho. Mesmo PIN da tela de receitas.</p>
   <form id="lock-form" autocomplete="off">
     <input class="inp" type="text" id="lock-user" placeholder="Operador (obrigatório)" maxlength="60">
     <input class="inp" type="password" id="lock-pin" placeholder="PIN" inputmode="numeric">
@@ -193,6 +207,29 @@
     <div class="cmd-desc">Ligar: grupo selecionado no supervisório, em REMOTO e sem intertravamento. Desligar: só com o moinho e o BM141 parados.
       Com o moinho parado, o CLP desliga o grupo sozinho depois de 20 h.</div>
     <div class="msg" id="g5-msg"></div>
+  </div>
+
+  <div class="section-title" id="fn-tit">Exaustor do filtro — FN042</div>
+  <div class="card">
+    <div class="pills" id="fn-pills"></div>
+    <div class="vals">
+      <div class="val"><div class="l">Velocidade</div><div class="v" id="fn-hz">—</div></div>
+      <div class="val"><div class="l">Corrente</div><div class="v" id="fn-a">—</div></div>
+      <div class="val"><div class="l">Referência</div><div class="v" id="fn-sp">—</div></div>
+    </div>
+    <div class="row">
+      <button class="btn ok" id="btn-fn-ligar">Ligar exaustor</button>
+      <button class="btn sec" id="btn-fn-desligar">Desligar exaustor</button>
+    </div>
+    <div class="vel">
+      <button class="btn sec" id="fn-menos">−</button>
+      <input class="inp" id="fn-novo" type="number" inputmode="decimal" step="0.5">
+      <button class="btn sec" id="fn-mais">+</button>
+      <button class="btn" id="btn-fn-vel">Aplicar</button>
+    </div>
+    <div class="cmd-desc" id="fn-desc">Ligar: Grupo 6 selecionado em REMOTO, exaustor selecionado, sem intertravamento e inversor pronto. Desligar: só com o moinho parado.
+      Velocidade de 30 a 55 Hz; com a alimentação automática ligada quem comanda é o PID.</div>
+    <div class="msg" id="fn-msg"></div>
   </div>
 
   <div class="section-title">Moinho</div>
@@ -306,6 +343,8 @@
       $('g5-pills').innerHTML = pill('pill-off', 'lendo…'); $('g5-bombas').innerHTML = ''; $('m-pills').innerHTML = '';
       // sem estado lido não há como aplicar as regras na tela: botões travados
       $('btn-ligar').disabled = $('btn-desligar').disabled = $('btn-parar').disabled = true;
+      $('fn-pills').innerHTML = pill('pill-off', 'lendo…');
+      $('btn-fn-ligar').disabled = $('btn-fn-desligar').disabled = $('btn-fn-vel').disabled = $('fn-menos').disabled = $('fn-mais').disabled = true;
       return;
     }
     var g = e.grupo5;
@@ -329,13 +368,57 @@
     $('btn-ligar').disabled = ocupado || g.ligado || g.liga;
     $('btn-desligar').disabled = ocupado || g.desliga || e.moinhoRodando || e.bm141Rodando || (!g.ligado && !g.liga && !e.bombas.some(function(b){ return b.ligado; }));
     $('btn-parar').disabled = ocupado || !e.moinhoRodando;
+    renderExaustor(e);
+  }
+
+  // Motivo pelo qual o CLP reescreve a referência (mesma regra do servidor)
+  function travaVel(e, x){
+    if (x.couching && e.moinhoRodando) return 'Moinho em couching: o CLP força 30 Hz.';
+    if (x.alimAuto && x.ligado) return 'Alimentação automática: velocidade comandada pelo PID.';
+    return null;
+  }
+  var fnEditado = { '501': false, '502': false };
+  function fmtHz(v){ return v == null ? '—' : Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }); }
+  function renderExaustor(e){
+    var x = e.exaustor;
+    $('fn-tit').textContent = 'Exaustor do filtro — ' + linhaAtiva + 'FN042';
+    if (!x || x.erro){
+      $('fn-pills').innerHTML = pill('pill-bad', x ? 'SEM LEITURA: ' + esc(x.erro) : 'SERVIDOR SEM EXAUSTOR (receitas.js antigo)');
+      $('btn-fn-ligar').disabled = $('btn-fn-desligar').disabled = $('btn-fn-vel').disabled = $('fn-menos').disabled = $('fn-mais').disabled = true;
+      $('fn-hz').textContent = $('fn-a').textContent = $('fn-sp').textContent = '—';
+      return;
+    }
+    var p = [];
+    p.push(x.ligado ? pill('pill-on', '● LIGADO') : pill('pill-off', '○ DESLIGADO'));
+    if (x.desliga) p.push(pill('pill-warn', 'DESLIGANDO'));
+    p.push(x.selecionado ? pill('pill-on', 'SELECIONADO') : pill('pill-bad', 'NÃO SELECIONADO'));
+    p.push(x.operacional ? pill('pill-on', 'GRUPO 6 REMOTO') : pill('pill-bad', 'GRUPO 6 LOCAL / NÃO SEL.'));
+    var faltam = ['protecao','seguranca'].filter(function(k){ return !x[k]; });
+    if (faltam.length) p.push(pill('pill-bad', 'INTERTRAV.: ' + faltam.join(', ').toUpperCase()));
+    if (!x.ligado) p.push(x.pronto ? pill('pill-on', 'PRONTO') : pill('pill-bad', 'NÃO PRONTO'));
+    var trava = travaVel(e, x);
+    p.push(trava ? pill('pill-warn', x.couching && e.moinhoRodando ? 'COUCHING' : 'PID AUTOMÁTICO') : pill('pill-off', 'VELOCIDADE MANUAL'));
+    $('fn-pills').innerHTML = p.join('');
+    $('fn-hz').innerHTML = fmtHz(x.hz) + ' <small>Hz</small>';
+    $('fn-a').innerHTML = fmtHz(x.a) + ' <small>A</small>';
+    $('fn-sp').innerHTML = fmtHz(x.setpoint) + ' <small>Hz</small>';
+    var inp = $('fn-novo');
+    if (!fnEditado[linhaAtiva] && document.activeElement !== inp) inp.value = x.setpoint;
+    inp.min = x.min; inp.max = x.max;
+    inp.classList.toggle('mudou', Number(inp.value) !== x.setpoint);
+    $('btn-fn-ligar').disabled = ocupado || x.ligado || !x.selecionado || !x.operacional || faltam.length > 0 || !x.pronto;
+    $('btn-fn-desligar').disabled = ocupado || !x.ligado || x.desliga || e.moinhoRodando || e.bm141Rodando;
+    $('btn-fn-vel').disabled = $('fn-menos').disabled = $('fn-mais').disabled = inp.disabled = ocupado || !!trava;
+    $('fn-desc').innerHTML = trava ? '<span style="color:var(--warn)">' + esc(trava) + ' Para ajustar à mão, passe a alimentação para manual no supervisório.</span>'
+      : 'Ligar: Grupo 6 selecionado em REMOTO, exaustor selecionado, sem intertravamento e inversor pronto. Desligar: só com o moinho parado. Velocidade de ' + x.min + ' a ' + x.max + ' Hz.';
   }
 
   document.querySelectorAll('.tab').forEach(function(t){
     t.addEventListener('click', function(){
       document.querySelectorAll('.tab').forEach(function(x){ x.classList.remove('active'); });
       t.classList.add('active'); linhaAtiva = t.dataset.linha;
-      $('g5-msg').textContent = ''; $('m-msg').textContent = '';
+      $('g5-msg').textContent = ''; $('m-msg').textContent = ''; $('fn-msg').textContent = '';
+      fnEditado[linhaAtiva] = false;
       render(); ler();
     });
   });
@@ -383,6 +466,61 @@
     $('m-ok').addEventListener('click', function(){
       fecharModal();
       enviar('/api/comandos/' + L + '/grupo5', { usuario: operador(), acao: 'desligar' }, 'g5-msg');
+    });
+  });
+
+  // ── Exaustor ────────────────────────────────────────────────────────────
+  function ajustarVel(d){
+    var x = estado[linhaAtiva] && estado[linhaAtiva].exaustor; if (!x || x.erro) return;
+    var v = Number($('fn-novo').value); if (!isFinite(v)) v = x.setpoint;
+    v = Math.round((v + d) * 10) / 10; v = Math.min(x.max, Math.max(x.min, v));
+    $('fn-novo').value = v; fnEditado[linhaAtiva] = true; render();
+  }
+  $('fn-menos').addEventListener('click', function(){ ajustarVel(-0.5); });
+  $('fn-mais').addEventListener('click', function(){ ajustarVel(0.5); });
+  $('fn-novo').addEventListener('input', function(){ fnEditado[linhaAtiva] = true; this.classList.add('mudou'); });
+
+  $('btn-fn-ligar').addEventListener('click', function(){
+    var L = linhaAtiva;
+    abrirModal('Ligar exaustor ' + L + 'FN042',
+      '<div class="aviso warn">Partida remota do exaustor do filtro <b>' + L + 'FN042</b>.</div>' +
+      '<label class="chk"><input type="checkbox" id="chk-seg"> Confirmo que não há pessoas expostas no exaustor, no filtro e nos dutos e que o equipamento em manutenção está bloqueado (LOTO).</label>' +
+      '<div class="aviso info">Linha <b>' + L + '</b> · Operador <b>' + esc(operador()) + '</b></div>' +
+      '<div class="row"><button class="btn sec" id="m-cancel">Cancelar</button><button class="btn ok" id="m-ok" disabled>Ligar exaustor</button></div>');
+    $('chk-seg').addEventListener('change', function(){ $('m-ok').disabled = !this.checked; });
+    $('m-cancel').addEventListener('click', fecharModal);
+    $('m-ok').addEventListener('click', function(){
+      fecharModal();
+      enviar('/api/comandos/' + L + '/exaustor', { usuario: operador(), acao: 'ligar', confirmaSeguranca: true }, 'fn-msg');
+    });
+  });
+
+  $('btn-fn-desligar').addEventListener('click', function(){
+    var L = linhaAtiva;
+    abrirModal('Desligar exaustor ' + L + 'FN042',
+      '<div class="aviso warn">Desliga o exaustor do filtro <b>' + L + 'FN042</b>. O servidor só aceita com o moinho parado.</div>' +
+      '<div class="aviso info">Linha <b>' + L + '</b> · Operador <b>' + esc(operador()) + '</b></div>' +
+      '<div class="row"><button class="btn sec" id="m-cancel">Cancelar</button><button class="btn danger" id="m-ok">Desligar exaustor</button></div>');
+    $('m-cancel').addEventListener('click', fecharModal);
+    $('m-ok').addEventListener('click', function(){
+      fecharModal();
+      enviar('/api/comandos/' + L + '/exaustor', { usuario: operador(), acao: 'desligar' }, 'fn-msg');
+    });
+  });
+
+  $('btn-fn-vel').addEventListener('click', function(){
+    var L = linhaAtiva, x = estado[L] && estado[L].exaustor; if (!x || x.erro) return;
+    var v = Math.round(Number(String($('fn-novo').value).replace(',', '.')) * 10) / 10;
+    if (!isFinite(v) || v < x.min || v > x.max){ msg('fn-msg', 'bad', 'Velocidade deve ser de ' + x.min + ' a ' + x.max + ' Hz.'); return; }
+    abrirModal('Velocidade do exaustor ' + L + 'FN042',
+      '<div class="aviso warn">Referência de <b>' + fmtHz(x.setpoint) + ' Hz</b> para <b>' + fmtHz(v) + ' Hz</b>.' +
+      (x.ligado ? ' O inversor muda a velocidade pela rampa.' : ' O exaustor está desligado: vale na próxima partida.') + '</div>' +
+      '<div class="aviso info">Linha <b>' + L + '</b> · Operador <b>' + esc(operador()) + '</b></div>' +
+      '<div class="row"><button class="btn sec" id="m-cancel">Cancelar</button><button class="btn" id="m-ok">Aplicar ' + fmtHz(v) + ' Hz</button></div>');
+    $('m-cancel').addEventListener('click', fecharModal);
+    $('m-ok').addEventListener('click', function(){
+      fecharModal(); fnEditado[L] = false;
+      enviar('/api/comandos/' + L + '/exaustor', { usuario: operador(), acao: 'velocidade', hz: v }, 'fn-msg');
     });
   });
 

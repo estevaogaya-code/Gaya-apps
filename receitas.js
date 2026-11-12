@@ -71,6 +71,26 @@ function tagsComandos(L) {
 }
 const bitDe = (v, b) => ((Number(v) | 0) & (1 << b)) !== 0;
 
+// Exaustor do filtro do moinho 50xFN042 (inversor ATV630, rotina GR6_50xFN042):
+//   M50xFN042: .0 proteção, .1 segurança, .2 operacional (Grupo 6 selecionado e não local),
+//   .5 pronto, .6 retorno de ligado, .15 LIGA via supervisório (o ladder NÃO zera: pulso),
+//   .16 DESLIGA via supervisório (selado com .6), .17 seleção via supervisório.
+//   Referência de velocidade: EA_REDE_50xFN042_VELOCIDADE_AJUSTE[15] em Hz (o CLP manda x10
+//   ao inversor). Com alimentação automática e o exaustor ligado o PID reescreve o [15] a cada
+//   scan (501: HAB_ALIM_AUTO_501BM140 fora do couching; 502: SEL_ALIM_AUT_502BM140);
+//   no 501 o couching (FLAG_COUCHING_M1 com moinho rodando) força 30 Hz.
+const FN_BITS = { protecao: 0, seguranca: 1, operacional: 2, pronto: 5, ligado: 6, liga: 15, desliga: 16, selecionado: 17 };
+const EXAUSTOR_HZ = { min: 30, max: 55 };
+function tagsExaustor(L) {
+  return {
+    codigo: `${L}FN042`, st: `M${L}FN042`,
+    sp: `EA_REDE_${L}FN042_VELOCIDADE_AJUSTE[15]`, hz: `EA_REDE_${L}FN042_VELOCIDADE_AJUSTE[9]`,
+    a: `EA_REDE_${L}FN042_CORRENTE_AJUSTE[9]`,
+    auto: L === '501' ? 'HAB_ALIM_AUTO_501BM140' : 'SEL_ALIM_AUT_502BM140',
+    couching: L === '501' ? 'FLAG_COUCHING_M1' : null,
+  };
+}
+
 // ─── Funções puras ────────────────────────────────────────────────────────────
 
 function tagsDaLinha(L) {
@@ -219,6 +239,7 @@ function criarReceitas(opts) {
     leituraMs     = 2000,    // timeout por leitura de tag
     pausaReleituraMs = 300,
     pulsoMs       = 1000,    // duração do pulso dos botões de reset
+    partidaMs     = 8000,    // exaustor: espera do retorno de ligado antes de soltar o .15
     maxFalhasPin  = 5,
     bloqueioMs    = 10 * 60 * 1000,
   } = opts;
@@ -682,7 +703,24 @@ function criarReceitas(opts) {
     }
     const g = {};
     for (const [k, b] of Object.entries(GR5_BITS)) g[k] = bitDe(gr5, b);
-    return { linha: L, grupo5: g, moinhoRodando: bitDe(moinho, 6), bm141Rodando: bitDe(bm141, 6), paradaMoinhoAtiva: bitDe(gr8, 16), bombas };
+    let exaustor;
+    try { exaustor = await lerExaustor(PLC, L); }
+    catch (e) { exaustor = { codigo: tagsExaustor(L).codigo, erro: (e && e.corpo && e.corpo.mensagem) || String(e) }; }
+    return { linha: L, grupo5: g, moinhoRodando: bitDe(moinho, 6), bm141Rodando: bitDe(bm141, 6), paradaMoinhoAtiva: bitDe(gr8, 16), bombas, exaustor };
+  }
+
+  async function lerExaustor(PLC, L) {
+    const t = tagsExaustor(L);
+    const st = Number((await lerTag(PLC, t.st)).value);
+    const r1 = v => Math.round(Number(v) * 10) / 10;
+    const g = { codigo: t.codigo, min: EXAUSTOR_HZ.min, max: EXAUSTOR_HZ.max };
+    for (const [k, b] of Object.entries(FN_BITS)) g[k] = bitDe(st, b);
+    g.setpoint = r1((await lerTag(PLC, t.sp)).value);
+    g.hz = r1((await lerTag(PLC, t.hz)).value);
+    g.a = r1((await lerTag(PLC, t.a)).value);
+    g.alimAuto = !!(await lerTag(PLC, t.auto)).value;
+    g.couching = t.couching ? !!(await lerTag(PLC, t.couching)).value : false;
+    return g;
   }
 
   const erroDeCip = e => (e && e.generalStatusCode != null) ? `CIP status ${e.generalStatusCode}` : ((e && e.message) || String(e));
@@ -733,6 +771,94 @@ function criarReceitas(opts) {
       mensagem: acao === 'ligar' ? `Comando LIGAR enviado ao Grupo 5 da linha ${L}. As bombas partem em sequência.` : `Comando DESLIGAR enviado ao Grupo 5 da linha ${L}.` };
     if (resultado === 'recusado_clp') throw erroHttp(409, 'recusado_clp', { estado: depois, mensagem: 'O CLP não manteve o comando de ligar (intertravamento). Confira no supervisório.' });
     throw erroHttp(502, 'falha_escrita', { erroEscrita, estado: depois, mensagem: 'O CLP não aceitou o comando. Confira no supervisório.' });
+  }
+
+  // Motivo pelo qual o CLP reescreve a referência de velocidade (null = livre)
+  function velocidadeTravada(ex, moinhoRodando) {
+    if (ex.couching && moinhoRodando) return 'O moinho está em couching — o CLP força 30 Hz no exaustor.';
+    if (ex.alimAuto && ex.ligado) return 'Alimentação automática ligada: a velocidade do exaustor é comandada pelo PID. Passe para manual no supervisório para ajustar.';
+    return null;
+  }
+
+  async function executarExaustor(PLC, job, { L, acao, hz, usuario, ip }) {
+    const t = tagsExaustor(L);
+    const log = { ip, usuario, linha: L, rota: 'exaustor', acao, hz };
+    let est;
+    try { est = await lerComandos(PLC, L); if (est.exaustor.erro) throw erroHttp(504, 'falha_leitura_clp', { mensagem: est.exaustor.erro }); }
+    catch (e) { registrarLog({ ...log, resultado: 'falha_leitura' }); throw e; }
+    const ex = est.exaustor;
+    log.antes = { exaustor: ex, moinhoRodando: est.moinhoRodando };
+    const recusar = (erro, mensagem) => { registrarLog({ ...log, resultado: erro }); throw erroHttp(409, erro, { mensagem, estado: est }); };
+    const cancelado = () => { if (job.cancelado) { registrarLog({ ...log, resultado: 'timeout_nao_executado' }); throw erroHttp(504, 'timeout', { executado: false, mensagem: 'Tempo esgotado — o comando não foi enviado.' }); } };
+
+    if (acao === 'velocidade') {
+      const trava = velocidadeTravada(ex, est.moinhoRodando);
+      if (trava) recusar('velocidade_automatica', trava);
+      cancelado();
+      job.escritaEnviada = true;
+      let erroEscrita = null, lido = null;
+      try { const tag = await lerTag(PLC, t.sp); tag.value = hz; await PLC.writeTag(tag); }
+      catch (e) { erroEscrita = erroDeCip(e); }
+      await sleep(pausaReleituraMs);
+      try { lido = Number((await lerTag(PLC, t.sp)).value); } catch (_) {}
+      const ok = !erroEscrita && lido != null && Math.abs(lido - hz) < 0.05;
+      registrarLog({ ...log, resultado: ok ? 'ok' : 'falha_escrita', erroEscrita, lido });
+      let depois = null; try { depois = await lerComandos(PLC, L); } catch (_) {}
+      if (ok) return { ok: true, linha: L, acao, estado: depois, mensagem: `Velocidade do exaustor ${t.codigo} ajustada para ${hz.toLocaleString('pt-BR')} Hz.` };
+      throw erroHttp(502, 'falha_escrita', { erroEscrita, estado: depois,
+        mensagem: lido != null && !erroEscrita ? `O CLP não manteve a referência (lido ${lido} Hz) — algum rung está reescrevendo o valor.` : 'O CLP não aceitou a referência de velocidade.' });
+    }
+
+    if (acao === 'ligar') {
+      if (ex.ligado) recusar('ja_ligado', `O exaustor ${t.codigo} já está ligado.`);
+      if (!ex.selecionado) recusar('nao_selecionado', `O exaustor ${t.codigo} não está selecionado no supervisório.`);
+      if (!ex.operacional) recusar('nao_selecionado', `O Grupo 6 da linha ${L} não está selecionado ou está em LOCAL — partida remota bloqueada.`);
+      const faltam = ['protecao', 'seguranca'].filter(k => !ex[k]);
+      if (faltam.length) recusar('intertravamento', `Intertravamento ativo no exaustor ${t.codigo}: ${faltam.join(', ')}. Confira no supervisório.`);
+      if (!ex.pronto) recusar('nao_pronto', `O inversor do ${t.codigo} não está pronto. Confira no supervisório.`);
+      cancelado();
+      // Pulso no .15: o ladder não o zera; se ficasse ligado, o exaustor religaria sozinho após um desligamento.
+      const nome = `${t.st}.${FN_BITS.liga}`;
+      let erroLigar = null, erroDesligar = null, solto = false, partiu = false;
+      job.escritaEnviada = true;
+      try { await escreverBit(PLC, nome, true); } catch (e) { erroLigar = erroDeCip(e); }
+      const fim = agora() + partidaMs;
+      while (!erroLigar && !partiu && agora() < fim) {
+        await sleep(pausaReleituraMs);
+        try { partiu = bitDe((await lerTag(PLC, t.st)).value, FN_BITS.ligado); } catch (_) {}
+      }
+      for (let tent = 0; tent < 3 && !solto; tent++) {
+        try {
+          await escreverBit(PLC, nome, false);
+          await sleep(pausaReleituraMs);
+          solto = !(await lerTag(PLC, nome)).value;
+          if (!solto) erroDesligar = 'releitura mostra o bit ainda ligado';
+        } catch (e) { erroDesligar = erroDeCip(e); }
+      }
+      let depois = null; try { depois = await lerComandos(PLC, L); } catch (_) {}
+      const resultado = !solto ? 'bit_preso' : erroLigar ? 'falha_escrita' : partiu ? 'ok' : 'nao_partiu';
+      registrarLog({ ...log, resultado, erroLigar, erroDesligar: solto ? null : erroDesligar, depois: depois ? { exaustor: depois.exaustor } : null });
+      if (resultado === 'ok') return { ok: true, linha: L, acao, estado: depois, mensagem: `Exaustor ${t.codigo} ligado.` };
+      if (resultado === 'bit_preso') throw erroHttp(502, 'bit_preso', { erroDesligar, estado: depois,
+        mensagem: `ATENÇÃO: ${nome} pode ter ficado LIGADO — o exaustor religaria sozinho depois de desligado. Zere pelo supervisório agora.` });
+      if (resultado === 'nao_partiu') throw erroHttp(409, 'nao_partiu', { estado: depois, mensagem: `O exaustor ${t.codigo} não deu retorno de ligado em ${Math.round(partidaMs / 1000)} s. Confira no supervisório.` });
+      throw erroHttp(502, 'falha_escrita', { erroEscrita: erroLigar, estado: depois, mensagem: 'O CLP não aceitou o comando de ligar.' });
+    }
+
+    // desligar
+    if (est.moinhoRodando || est.bm141Rodando)
+      recusar('moinho_rodando', `Moinho ${L} está rodando — desligar o exaustor agora tira a exaustão do moinho e do filtro. Pare o moinho primeiro.`);
+    if (!ex.ligado) recusar('ja_desligado', `O exaustor ${t.codigo} já está desligado.`);
+    cancelado();
+    let erroEscrita = null;
+    job.escritaEnviada = true;
+    try { await escreverBit(PLC, `${t.st}.${FN_BITS.liga}`, false); await escreverBit(PLC, `${t.st}.${FN_BITS.desliga}`, true); }
+    catch (e) { erroEscrita = erroDeCip(e); }
+    await sleep(pausaReleituraMs);
+    let depois = null; try { depois = await lerComandos(PLC, L); } catch (_) {}
+    registrarLog({ ...log, resultado: erroEscrita ? 'falha_escrita' : 'ok', erroEscrita, depois: depois ? { exaustor: depois.exaustor } : null });
+    if (!erroEscrita) return { ok: true, linha: L, acao, estado: depois, mensagem: `Comando DESLIGAR enviado ao exaustor ${t.codigo}.` };
+    throw erroHttp(502, 'falha_escrita', { erroEscrita, estado: depois, mensagem: 'O CLP não aceitou o comando de desligar. Confira no supervisório.' });
   }
 
   async function executarPararMoinho(PLC, job, { L, usuario, ip }) {
@@ -917,6 +1043,20 @@ function criarReceitas(opts) {
     },
     (PLC, job, o) => executarGrupo5(PLC, job, { ...o, acao: o.b.acao })));
 
+  router.post('/api/comandos/:linha/exaustor', registrarChegada, ...protegido, rotaComando('exaustor',
+    b => {
+      if (!['ligar', 'desligar', 'velocidade'].includes(b.acao)) return { erro: 'acao_invalida', mensagem: 'acao deve ser "ligar", "desligar" ou "velocidade".' };
+      if (b.acao === 'ligar' && b.confirmaSeguranca !== true)
+        return { erro: 'confirmacao_obrigatoria', mensagem: 'Confirme que não há pessoas expostas e que o equipamento em manutenção está bloqueado.' };
+      if (b.acao === 'velocidade') {
+        const hz = b.hz;
+        if (typeof hz !== 'number' || !Number.isFinite(hz) || Math.round(hz * 10) !== hz * 10 || hz < EXAUSTOR_HZ.min || hz > EXAUSTOR_HZ.max)
+          return { erro: 'velocidade_invalida', mensagem: `Velocidade deve ser de ${EXAUSTOR_HZ.min} a ${EXAUSTOR_HZ.max} Hz (uma casa decimal).` };
+      }
+      return null;
+    },
+    (PLC, job, o) => executarExaustor(PLC, job, { ...o, acao: o.b.acao, hz: o.b.hz })));
+
   router.post('/api/comandos/:linha/parar-moinho', registrarChegada, ...protegido, rotaComando('parar_moinho',
     b => (b.confirmacao === 'PARAR' ? null : { erro: 'confirmacao_obrigatoria', mensagem: 'Digite PARAR para confirmar.' }),
     (PLC, job, o) => executarPararMoinho(PLC, job, o)));
@@ -987,3 +1127,4 @@ module.exports.validarUmidade = validarUmidade;
 module.exports.normalizarNome = normalizarNome;
 module.exports.validarPeso = validarPeso;
 module.exports.tagsComandos = tagsComandos;
+module.exports.tagsExaustor = tagsExaustor;

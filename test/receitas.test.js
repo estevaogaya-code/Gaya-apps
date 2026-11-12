@@ -925,7 +925,7 @@ test('exaustor: leitura no estado dos comandos', async () => {
     assert.equal(r.status, 200);
     const ex = r.corpo.estado.exaustor;
     assert.equal(ex.codigo, '501FN042'); assert.equal(ex.ligado, true); assert.equal(ex.setpoint, 50);
-    assert.equal(ex.alimAuto, true); assert.equal(ex.min, 30); assert.equal(ex.max, 55);
+    assert.equal(ex.alimAuto, true); assert.equal(ex.min, 5); assert.equal(ex.max, 55);
     delete m.plc.mem.M502FN042; // tag ausente não derruba a tela
     memComandos(m.plc, '502'); delete m.plc.mem.M502FN042;
     const r2 = await m.req('GET', '/api/comandos/502', null, null);
@@ -973,17 +973,24 @@ test('exaustor: ligar sem retorno solta o .15 e avisa', async () => {
   } finally { await m.fechar(); }
 });
 
-test('exaustor: desligar bloqueado com moinho rodando', async () => {
+test('exaustor: desligar com moinho rodando exige DESLIGAR digitado', async () => {
   const m = await montar();
   try {
     memComandos(m.plc, '501', { moinho: true, fn: FN_OK | B(6) });
     let r = await m.req('POST', '/api/comandos/501/exaustor', { usuario: 'T', acao: 'desligar' });
     assert.equal(r.status, 409); assert.equal(r.corpo.erro, 'moinho_rodando');
     assert.deepEqual(bitsEscritos(m.plc), []);
+    r = await m.req('POST', '/api/comandos/501/exaustor', { usuario: 'T', acao: 'desligar', confirmacao: 'DESLIGAR' });
+    assert.equal(r.status, 200, JSON.stringify(r.corpo));
+    assert.deepEqual(bitsEscritos(m.plc), ['M501FN042.15=0', 'M501FN042.16=1']);
+    m.plc.bits = [];
     memComandos(m.plc, '501', { fn: FN_OK | B(6) });
     r = await m.req('POST', '/api/comandos/501/exaustor', { usuario: 'T', acao: 'desligar' });
     assert.equal(r.status, 200, JSON.stringify(r.corpo));
     assert.deepEqual(bitsEscritos(m.plc), ['M501FN042.15=0', 'M501FN042.16=1']);
+    memComandos(m.plc, '501');
+    r = await m.req('POST', '/api/comandos/501/exaustor', { usuario: 'T', acao: 'desligar' });
+    assert.equal(r.status, 409); assert.equal(r.corpo.erro, 'ja_desligado');
   } finally { await m.fechar(); }
 });
 
@@ -991,7 +998,7 @@ test('exaustor: velocidade — faixa, PID/couching e gravação', async () => {
   const m = await montar();
   try {
     memComandos(m.plc, '501', { fn: FN_OK | B(6), auto: true });
-    for (const hz of [29.9, 55.1, '45', 45.55]) {
+    for (const hz of [4.9, 55.1, '45', 45.55]) {
       const r = await m.req('POST', '/api/comandos/501/exaustor', { usuario: 'T', acao: 'velocidade', hz });
       assert.equal(r.status, 400, String(hz)); assert.equal(r.corpo.erro, 'velocidade_invalida');
     }
@@ -1002,6 +1009,8 @@ test('exaustor: velocidade — faixa, PID/couching e gravação', async () => {
     assert.equal(r.status, 409); assert.equal(r.corpo.erro, 'velocidade_automatica');
 
     memComandos(m.plc, '501', { fn: FN_OK | B(6), moinho: true });
+    r = await m.req('POST', '/api/comandos/501/exaustor', { usuario: 'T', acao: 'velocidade', hz: 5 });
+    assert.equal(r.status, 200, JSON.stringify(r.corpo));
     r = await m.req('POST', '/api/comandos/501/exaustor', { usuario: 'T', acao: 'velocidade', hz: 45.5 });
     assert.equal(r.status, 200, JSON.stringify(r.corpo));
     assert.equal(m.plc.mem['EA_REDE_501FN042_VELOCIDADE_AJUSTE[15]'], Math.fround(45.5));

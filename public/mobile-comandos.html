@@ -13,7 +13,7 @@
     POST /api/comandos/:linha/parar-moinho  { confirmacao: 'PARAR' }  (PIN)
     POST /api/comandos/:linha/exaustor      { acao: ligar|desligar|velocidade, hz } (PIN)
   Exaustor 50xFN042: ligar com Grupo 6 selecionado em REMOTO, sem intertravamento e inversor
-  pronto; desligar só com o moinho parado; velocidade 30–55 Hz, bloqueada quando o PID da
+  pronto; desligar com o moinho rodando só digitando DESLIGAR; velocidade 5–55 Hz, bloqueada quando o PID da
   alimentação automática (ou o couching do 501) está comandando a referência.
   Regras (no servidor): ligar só com o grupo selecionado, em REMOTO e sem
   intertravamento; desligar só com o moinho (BM140) e o BM141 parados.
@@ -227,8 +227,8 @@
       <button class="btn sec" id="fn-mais">+</button>
       <button class="btn" id="btn-fn-vel">Aplicar</button>
     </div>
-    <div class="cmd-desc" id="fn-desc">Ligar: Grupo 6 selecionado em REMOTO, exaustor selecionado, sem intertravamento e inversor pronto. Desligar: só com o moinho parado.
-      Velocidade de 30 a 55 Hz; com a alimentação automática ligada quem comanda é o PID.</div>
+    <div class="cmd-desc" id="fn-desc">Ligar: Grupo 6 selecionado em REMOTO, exaustor selecionado, sem intertravamento e inversor pronto. Desligar com o moinho rodando pede confirmação.
+      Velocidade de 5 a 55 Hz; com a alimentação automática ligada quem comanda é o PID.</div>
     <div class="msg" id="fn-msg"></div>
   </div>
 
@@ -407,10 +407,11 @@
     inp.min = x.min; inp.max = x.max;
     inp.classList.toggle('mudou', Number(inp.value) !== x.setpoint);
     $('btn-fn-ligar').disabled = ocupado || x.ligado || !x.selecionado || !x.operacional || faltam.length > 0 || !x.pronto;
-    $('btn-fn-desligar').disabled = ocupado || !x.ligado || x.desliga || e.moinhoRodando || e.bm141Rodando;
+    $('btn-fn-desligar').disabled = ocupado || !x.ligado || x.desliga;
+    $('btn-fn-desligar').className = 'btn ' + (x.ligado ? 'danger' : 'sec');
     $('btn-fn-vel').disabled = $('fn-menos').disabled = $('fn-mais').disabled = inp.disabled = ocupado || !!trava;
     $('fn-desc').innerHTML = trava ? '<span style="color:var(--warn)">' + esc(trava) + ' Para ajustar à mão, passe a alimentação para manual no supervisório.</span>'
-      : 'Ligar: Grupo 6 selecionado em REMOTO, exaustor selecionado, sem intertravamento e inversor pronto. Desligar: só com o moinho parado. Velocidade de ' + x.min + ' a ' + x.max + ' Hz.';
+      : 'Ligar: Grupo 6 selecionado em REMOTO, exaustor selecionado, sem intertravamento e inversor pronto. Desligar com o moinho rodando pede confirmação. Velocidade de ' + x.min + ' a ' + x.max + ' Hz.';
   }
 
   document.querySelectorAll('.tab').forEach(function(t){
@@ -496,15 +497,26 @@
   });
 
   $('btn-fn-desligar').addEventListener('click', function(){
-    var L = linhaAtiva;
+    var L = linhaAtiva, e = estado[L] || {};
+    var comMoinho = !!(e.moinhoRodando || e.bm141Rodando);
     abrirModal('Desligar exaustor ' + L + 'FN042',
-      '<div class="aviso warn">Desliga o exaustor do filtro <b>' + L + 'FN042</b>. O servidor só aceita com o moinho parado.</div>' +
+      (comMoinho
+        ? '<div class="aviso bad"><b>O moinho ' + L + ' está rodando.</b> Desligar o exaustor tira a exaustão do moinho e do filtro.</div>' +
+          '<div style="margin-top:10px;font-size:12.5px">Digite <b>DESLIGAR</b> para confirmar:</div>' +
+          '<input class="inp" id="m-conf" autocomplete="off" autocapitalize="characters" style="margin-top:6px;text-transform:uppercase">'
+        : '<div class="aviso warn">Desliga o exaustor do filtro <b>' + L + 'FN042</b>.</div>') +
       '<div class="aviso info">Linha <b>' + L + '</b> · Operador <b>' + esc(operador()) + '</b></div>' +
-      '<div class="row"><button class="btn sec" id="m-cancel">Cancelar</button><button class="btn danger" id="m-ok">Desligar exaustor</button></div>');
+      '<div class="row"><button class="btn sec" id="m-cancel">Cancelar</button><button class="btn danger" id="m-ok"' + (comMoinho ? ' disabled' : '') + '>Desligar exaustor</button></div>');
+    if (comMoinho){
+      $('m-conf').addEventListener('input', function(){ $('m-ok').disabled = this.value.trim().toUpperCase() !== 'DESLIGAR'; });
+      setTimeout(function(){ $('m-conf').focus(); }, 50);
+    }
     $('m-cancel').addEventListener('click', fecharModal);
     $('m-ok').addEventListener('click', function(){
       fecharModal();
-      enviar('/api/comandos/' + L + '/exaustor', { usuario: operador(), acao: 'desligar' }, 'fn-msg');
+      var corpo = { usuario: operador(), acao: 'desligar' };
+      if (comMoinho) corpo.confirmacao = 'DESLIGAR';
+      enviar('/api/comandos/' + L + '/exaustor', corpo, 'fn-msg');
     });
   });
 

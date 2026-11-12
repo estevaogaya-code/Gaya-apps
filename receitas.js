@@ -80,7 +80,7 @@ const bitDe = (v, b) => ((Number(v) | 0) & (1 << b)) !== 0;
 //   scan (501: HAB_ALIM_AUTO_501BM140 fora do couching; 502: SEL_ALIM_AUT_502BM140);
 //   no 501 o couching (FLAG_COUCHING_M1 com moinho rodando) força 30 Hz.
 const FN_BITS = { protecao: 0, seguranca: 1, operacional: 2, pronto: 5, ligado: 6, liga: 15, desliga: 16, selecionado: 17 };
-const EXAUSTOR_HZ = { min: 30, max: 55 };
+const EXAUSTOR_HZ = { min: 5, max: 55 };
 function tagsExaustor(L) {
   return {
     codigo: `${L}FN042`, st: `M${L}FN042`,
@@ -780,7 +780,7 @@ function criarReceitas(opts) {
     return null;
   }
 
-  async function executarExaustor(PLC, job, { L, acao, hz, usuario, ip }) {
+  async function executarExaustor(PLC, job, { L, acao, hz, confirmacao, usuario, ip }) {
     const t = tagsExaustor(L);
     const log = { ip, usuario, linha: L, rota: 'exaustor', acao, hz };
     let est;
@@ -846,9 +846,11 @@ function criarReceitas(opts) {
     }
 
     // desligar
-    if (est.moinhoRodando || est.bm141Rodando)
-      recusar('moinho_rodando', `Moinho ${L} está rodando — desligar o exaustor agora tira a exaustão do moinho e do filtro. Pare o moinho primeiro.`);
     if (!ex.ligado) recusar('ja_desligado', `O exaustor ${t.codigo} já está desligado.`);
+    // Com o moinho rodando é permitido, mas só com confirmação digitada (tira a exaustão do moinho e do filtro)
+    if ((est.moinhoRodando || est.bm141Rodando) && confirmacao !== 'DESLIGAR')
+      recusar('moinho_rodando', `Moinho ${L} está rodando — desligar o exaustor tira a exaustão do moinho e do filtro. Digite DESLIGAR para confirmar.`);
+    log.comMoinhoRodando = !!(est.moinhoRodando || est.bm141Rodando);
     cancelado();
     let erroEscrita = null;
     job.escritaEnviada = true;
@@ -1055,7 +1057,7 @@ function criarReceitas(opts) {
       }
       return null;
     },
-    (PLC, job, o) => executarExaustor(PLC, job, { ...o, acao: o.b.acao, hz: o.b.hz })));
+    (PLC, job, o) => executarExaustor(PLC, job, { ...o, acao: o.b.acao, hz: o.b.hz, confirmacao: o.b.confirmacao })));
 
   router.post('/api/comandos/:linha/parar-moinho', registrarChegada, ...protegido, rotaComando('parar_moinho',
     b => (b.confirmacao === 'PARAR' ? null : { erro: 'confirmacao_obrigatoria', mensagem: 'Digite PARAR para confirmar.' }),

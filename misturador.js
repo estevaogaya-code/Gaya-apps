@@ -103,6 +103,15 @@ function criarMisturador(opts) {
   for (const c of CAPSULAS) config.capsulas[c.id] = materialDe(config.capsulas[c.id]);
   let hist = { ultimoSeq: null, ultimoAcum: null, registros: [] };
   try { hist = { ...hist, ...JSON.parse(fs.readFileSync(ARQ_HIST, 'utf8')) }; } catch (_) {}
+  // Registros antigos sem número da batelada (MX22_BAT_SEQ): reconstitui de trás para frente
+  if (hist.ultimoSeq != null && hist.registros.some(r => r.seq == null)) {
+    let cur = hist.ultimoSeq;
+    for (let i = hist.registros.length - 1; i >= 0; i--) {
+      const r = hist.registros[i];
+      if (r.seq == null) r.seq = cur;
+      cur = r.seq - (r.bateladas || 1);
+    }
+  }
 
   let salvando = Promise.resolve();
   const salvar = (arq, obj) => { const t = JSON.stringify(obj, null, 1); salvando = salvando.then(() => fs.promises.writeFile(arq, t, 'utf8')).catch(e => console.error('[MISTURADOR] erro salvando', arq, e.message)); return salvando; };
@@ -153,7 +162,7 @@ function criarMisturador(opts) {
       if (d > 0) { const m = (info.produtos || {})[i + 1] || `Produto ${i + 1}`; kg[m] = (kg[m] || 0) + d; total += d; }
     });
     const nBat = Number(seq) >= hist.ultimoSeq ? Number(seq) - hist.ultimoSeq : 1;
-    if (total > 0) hist.registros.push({ ts: agora(), bateladas: nBat, kg, totalKg: total, receita: info.nome || null, rcp });
+    if (total > 0) hist.registros.push({ ts: agora(), seq: Number(seq), bateladas: nBat, kg, totalKg: total, receita: info.nome || null, rcp });
     const corte = agora() - DIAS_HIST * 86400000;
     hist.registros = hist.registros.filter(r => r.ts >= corte);
     hist.ultimoSeq = Number(seq); hist.ultimoAcum = acum;

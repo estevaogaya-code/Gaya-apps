@@ -342,7 +342,7 @@
     ev.preventDefault();
     try {
       var j = await (await fetch('/api/misturador/historico', { cache: 'no-store' })).json();
-      var h = '<table class="tbl"><tr><th>Dia</th><th>Bat.</th><th>t</th><th>Receita</th></tr>' + (j.dias || []).map(function(d){
+      var h = '<table class="tbl"><tr><th>Dia</th><th>Bateladas</th><th>t</th><th>Receita</th></tr>' + (j.dias || []).map(function(d){
         var p = d.data.split('-'); return '<tr><td>' + p[2] + '/' + p[1] + '</td><td>' + d.bateladas + '</td><td>' + num(d.totalKg / 1000, 2) + '</td><td>' + esc(d.receita || '—') + '</td></tr>';
       }).join('') + '</table>';
       $('m-tit').textContent = 'Últimos 45 dias'; $('m-campos').innerHTML = (j.dias || []).length ? h : '<div style="color:var(--txt-dim)">Sem bateladas registradas.</div>';

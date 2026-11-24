@@ -212,6 +212,12 @@
   function num(v, c){ return v == null ? '—' : Number(v).toLocaleString('pt-BR', { minimumFractionDigits: c, maximumFractionDigits: c }); }
   function pill(cls, t){ return '<span class="pill ' + cls + '">' + t + '</span>'; }
   function rotulo(chave){ var m = ((dados && dados.materiais) || []).find(function(x){ return x.chave === chave; }); return m ? m.rotulo : chave; }
+  // Número da batelada no CLP (MX22_BAT_SEQ); registro que juntou várias mostra a faixa
+  function numBat(r){
+    if (r.seq == null) return '—';
+    var n = r.bateladas || 1;
+    return n > 1 ? (r.seq - n + 1) + '–' + r.seq : String(r.seq);
+  }
   function hora(ts){ return new Date(ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); }
 
   function relogio(){ $('relogio').textContent = new Date().toLocaleTimeString('pt-BR'); }
@@ -337,9 +343,9 @@
 
     // Últimos registros
     var ul = dados.ultimos || [];
-    $('ultimos').innerHTML = ul.length ? '<table class="tbl"><tr><th>Hora</th><th>Bat.</th><th>kg</th><th>Receita</th></tr>' + ul.map(function(r){
+    $('ultimos').innerHTML = ul.length ? '<table class="tbl"><tr><th>Hora</th><th>Nº</th><th>kg</th><th>Receita</th></tr>' + ul.map(function(r){
       var dt = new Date(r.ts), hojeStr = new Date().toDateString() === dt.toDateString();
-      return '<tr><td>' + (hojeStr ? '' : dt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' ') + hora(r.ts) + '</td><td>' + r.bateladas + '</td><td>' + kg(r.totalKg) + '</td><td>' + esc(r.receita || '—') + '</td></tr>';
+      return '<tr><td>' + (hojeStr ? '' : dt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' ') + hora(r.ts) + '</td><td>' + numBat(r) + '</td><td>' + kg(r.totalKg) + '</td><td>' + esc(r.receita || '—') + '</td></tr>';
     }).join('') + '</table>' : '<div style="color:var(--dim);font-size:15px">Sem bateladas registradas.</div>';
 
     // Válvula comandada fechada mas com fim de curso de aberta por mais de 15 s
@@ -411,7 +417,7 @@
     ev.preventDefault();
     try {
       var j = await (await fetch('/api/misturador/historico', { cache: 'no-store' })).json();
-      var h = '<table class="tbl"><tr><th>Dia</th><th>Bat.</th><th>t</th><th>Receita</th></tr>' + (j.dias || []).map(function(d){
+      var h = '<table class="tbl"><tr><th>Dia</th><th>Bateladas</th><th>t</th><th>Receita</th></tr>' + (j.dias || []).map(function(d){
         var p = d.data.split('-'); return '<tr><td>' + p[2] + '/' + p[1] + '</td><td>' + d.bateladas + '</td><td>' + num(d.totalKg / 1000, 2) + '</td><td>' + esc(d.receita || '—') + '</td></tr>';
       }).join('') + '</table>';
       abrirModal('Últimos 45 dias', (j.dias || []).length ? h : '<div style="color:var(--dim)">Sem bateladas registradas.</div>', null);

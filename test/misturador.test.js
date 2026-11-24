@@ -25,6 +25,7 @@ const PAYLOAD = {
 
 async function montar(o = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mix-'));
+  if (o.hist) fs.writeFileSync(path.join(dir, 'misturador_bateladas.json'), JSON.stringify(o.hist));
   const mem = {
     'EA_600WF023_WT_U01_AJUSTE[9]': 512.4, 'EA_REDE_600MX022_VELOCIDADE_AJUSTE[9]': 30, 'EA_REDE_600MX022_CORRENTE_AJUSTE[9]': 4.27,
     M600MX022: B(5) | B(6) | B(8),
@@ -122,6 +123,7 @@ test('misturador: bateladas pelo acumulador, histórico e aba Saídas do app', a
     assert.equal(h.registros.length, 2);
     assert.deepEqual(h.registros[0].kg, { Cinza: 600, 'CINZA AMBAR': 402 });
     assert.equal(h.registros[1].bateladas, 2);
+    assert.equal(h.registros[0].seq, 1); assert.equal(h.registros[1].seq, 3);
     const dia = t.m.resumoPorDia()['2026-11-07'];
     assert.equal(dia.bateladas, 3); assert.equal(dia.totalKg, 2995); assert.equal(dia.receita, 'MIX-60-40');
 
@@ -142,5 +144,15 @@ test('misturador: reconhecer alarmes escreve MX22_RESET', async () => {
     const r = await t.post('/api/misturador/reset', { usuario: 'Op' });
     assert.equal(r.status, 200, JSON.stringify(r.corpo));
     assert.deepEqual(t.escritas.pop(), ['MX22_RESET', true]);
+  } finally { await t.fechar(); }
+});
+
+test('bateladas: registros antigos sem número recebem o MX22_BAT_SEQ reconstituído', async () => {
+  const ts = new Date(2026, 10, 7, 9, 0).getTime();
+  const reg = n => ({ ts, bateladas: n, kg: { Cinza: 1000 * n }, totalKg: 1000 * n, receita: 'R', rcp: 1 });
+  const t = await montar({ hist: { ultimoSeq: 20, ultimoAcum: [0, 0, 0, 0], registros: [reg(1), reg(2), reg(1)] } });
+  try {
+    const j = await t.get();
+    assert.deepEqual(j.ultimos.map(r => r.seq), [20, 19, 17]);
   } finally { await t.fechar(); }
 });

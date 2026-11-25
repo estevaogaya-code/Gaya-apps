@@ -725,6 +725,24 @@ async function pushPayloadFirestore(payload) {
   }
 }
 
+// Dados do misturador 600MX022 para a aba Misturador do app (documento producao/misturador,
+// separado do producao/dados — o app nunca grava nele). Só grava quando algo mudou.
+const FIRESTORE_MIX_URL = FIRESTORE_URL.replace(/\/dados$/, '/misturador');
+let _mixFsAssinatura = '';
+async function sincronizarMisturadorFirestore() {
+  try {
+    const dados = misturador.dadosFirestore();
+    const assinatura = JSON.stringify({ ...dados, atualizadoEm: 0 });
+    if (assinatura === _mixFsAssinatura) return;
+    const body = { fields: { misturador: wrapFirestoreValue(dados), updatedAt: wrapFirestoreValue(Date.now()) } };
+    const resp = await fetch(FIRESTORE_MIX_URL, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!resp.ok) throw new Error(`Firestore respondeu ${resp.status}: ${(await resp.text().catch(() => '')).slice(0, 200)}`);
+    _mixFsAssinatura = assinatura;
+  } catch (e) {
+    console.error('[MISTURADOR] falha ao publicar no Firestore:', e.message);
+  }
+}
+
 // ── Especificações de qualidade por produto (mesma lógica do cimento_gaucho.html) ──
 const QUALIDADE_SPECS = {
   'CPIV':    { malhaMax: 5, blaineMin: 4200, blaineMax: 5500 },
@@ -2912,6 +2930,8 @@ async function iniciarEthernetIP() {
       setTimeout(() => {
         sincronizarBoletimFirebase();
         setInterval(sincronizarBoletimFirebase, 5 * 60 * 1000);
+        sincronizarMisturadorFirestore();
+        setInterval(sincronizarMisturadorFirestore, 5 * 60 * 1000);
       }, 60000); // espera 1min do boot pra garantir que já há amostras/turnos coletados
 
       // chained setTimeout — garante que o próximo ciclo só começa

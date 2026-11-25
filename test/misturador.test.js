@@ -206,3 +206,17 @@ test('potenciaKw: tensão do motor pela curva V/f', () => {
   assert.ok(Math.abs(potenciaKw(10, null) - 380 * k) < 1e-9); // sem Hz: 380 V
   assert.equal(potenciaKw(-3, 60), 0);
 });
+
+test('dadosFirestore: 45 dias resumidos e bateladas só dos últimos 10 dias', async () => {
+  const base = new Date(2026, 10, 7, 9, 0).getTime();
+  const reg = (diasAtras, seq) => ({ ts: base - diasAtras * 86400000, seq, bateladas: 1, kg: { Cinza: 1000 }, totalKg: 1000, receita: 'R', rcp: 1 });
+  const t = await montar({ hist: { ultimoSeq: 3, ultimoAcum: [0, 0, 0, 0], registros: [reg(30, 1), reg(12, 2), reg(2, 3)],
+    energia: { '2026-11-05': { kwh: 1.23456, minLigado: 10, minAuto: 8 } } } });
+  try {
+    const d = t.m.dadosFirestore();
+    assert.deepEqual(d.dias.map(x => x.data), ['2026-10-08', '2026-10-26', '2026-11-05']);
+    assert.equal(d.dias[2].kwh, 1.235);
+    assert.deepEqual(d.bateladas.map(x => x.seq), [3]);
+    assert.equal(d.diasBateladas, 10); assert.equal(d.rotulos.Cinza, 'Cinza Braskem');
+  } finally { await t.fechar(); }
+});

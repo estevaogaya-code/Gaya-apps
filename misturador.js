@@ -28,7 +28,8 @@
  * A corrente lida é a do motor (saída do inversor), então V é a tensão do motor pela curva
  * V/f: V = 380 × Hz / 60 (limitada a 380 V; sem leitura de Hz usa 380 V). Guarda por dia
  * kWh, minutos ligado e minutos em dosagem automática (45 dias, mesmo arquivo).
- * GET /api/misturador/boletim?inicio&fim devolve os dados do boletim (PDF gerado na tela).
+ * GET /api/misturador/boletim?inicio&fim devolve os dados do boletim (PDF gerado na tela);
+ * dadosFirestore() monta o documento producao/misturador que o server.js publica para o app.
  *
  * O resto da tela (balança, válvulas, misturador) só é lido com a tela aberta.
  */
@@ -53,6 +54,7 @@ const MATERIAIS = [
 ];
 const TAG_SELETORA = 'ED_600MX022_DOSAGEM';
 const BALANCA_MAX = 6000, BATELADA = 1000, DIAS_HIST = 45, N_PROD = 4;
+const DIAS_BAT_FS = 10; // bateladas uma a uma no Firestore (o resto vai resumido por dia)
 const TENSAO_V = 380, FREQ_NOM = 60, FP = 0.85, GAP_MAX_MS = 120000; // energia: rede 380 V / 60 Hz, mesmo FP do CLP (potência dos exaustores)
 // Tensão no motor pela curva V/f do inversor (corrente lida é a do motor)
 const tensaoMotor = hz => (hz == null || !Number.isFinite(Number(hz)) ? TENSAO_V : TENSAO_V * Math.min(1, Math.max(0, Number(hz)) / FREQ_NOM));
@@ -336,10 +338,7 @@ function criarMisturador(opts) {
   });
 
   // Dados do boletim: por dia (bateladas, kg por material, receitas, energia) e as bateladas do período
-  router.get('/api/misturador/boletim', (req, res) => {
-    const inicio = Number(req.query.inicio), fim = Number(req.query.fim);
-    if (!Number.isFinite(inicio) || !Number.isFinite(fim) || fim <= inicio)
-      return res.status(400).json({ ok: false, erro: 'periodo_invalido', mensagem: 'Informe inicio e fim (ms).' });
+  function dadosBoletim(inicio, fim) {
     const regs = hist.registros.filter(r => r.ts >= inicio && r.ts < fim);
     const dias = {};
     const novoDia = data => ({ data, bateladas: 0, totalKg: 0, kg: {}, receitas: {}, kwh: null, minLigado: null, minAuto: null, seqIni: null, seqFim: null });
@@ -361,14 +360,36 @@ function criarMisturador(opts) {
       const x = dias[k] || (dias[k] = novoDia(k));
       x.kwh = e.kwh; x.minLigado = e.minLigado; x.minAuto = e.minAuto;
     }
-    res.json({
+    return {
       ok: true, inicio, fim, tensao: TENSAO_V, freqNominal: FREQ_NOM, fp: FP, batelada: BATELADA, diasHistorico: DIAS_HIST,
       rotulos: Object.fromEntries(MATERIAIS.map(m => [m.chave, m.rotulo])),
       energiaDesde: Object.keys(hist.energia).sort()[0] || null,
       dias: Object.values(dias).sort((a, b) => a.data.localeCompare(b.data)),
       bateladas: regs.map(r => ({ ts: r.ts, seq: r.seq, bateladas: r.bateladas, totalKg: r.totalKg, kg: r.kg, receita: r.receita })),
-    });
+    };
+  }
+  router.get('/api/misturador/boletim', (req, res) => {
+    const inicio = Number(req.query.inicio), fim = Number(req.query.fim);
+    if (!Number.isFinite(inicio) || !Number.isFinite(fim) || fim <= inicio)
+      return res.status(400).json({ ok: false, erro: 'periodo_invalido', mensagem: 'Informe inicio e fim (ms).' });
+    res.json(dadosBoletim(inicio, fim));
   });
+
+  // Documento producao/misturador do Firestore (aba Misturador do app Cimento Gaúcho):
+  // os 45 dias por dia + as bateladas dos últimos DIAS_BAT_FS dias (limite de 1 MB do documento).
+  function dadosFirestore() {
+    const t = agora(), d = new Date(t);
+    const fim = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
+    const b = dadosBoletim(fim - (DIAS_HIST + 1) * 86400000, fim);
+    const r3 = v => (v == null ? null : Math.round(v * 1000) / 1000);
+    const corteBat = fim - DIAS_BAT_FS * 86400000;
+    return {
+      atualizadoEm: t, tensao: b.tensao, freqNominal: b.freqNominal, fp: b.fp, batelada: b.batelada, diasHistorico: b.diasHistorico,
+      diasBateladas: DIAS_BAT_FS, rotulos: b.rotulos, energiaDesde: b.energiaDesde,
+      dias: b.dias.map(x => ({ ...x, kwh: r3(x.kwh), minLigado: r3(x.minLigado), minAuto: r3(x.minAuto) })),
+      bateladas: b.bateladas.filter(x => x.ts >= corteBat),
+    };
+  }
 
   router.post('/api/misturador/capsulas', (req, res) => {
     if (!autorizado(req, res)) return;
@@ -427,7 +448,7 @@ function criarMisturador(opts) {
     }
   });
 
-  return { router, lerCiclo, aplicarNoPayload, resumoPorDia, _config: () => config, _hist: () => hist };
+  return { router, lerCiclo, aplicarNoPayload, resumoPorDia, dadosBoletim, dadosFirestore, _config: () => config, _hist: () => hist };
 }
 
 module.exports = criarMisturador;

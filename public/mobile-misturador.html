@@ -160,7 +160,7 @@
         <input class="inp" type="number" id="bol-th" inputmode="decimal" step="0.1" min="1" placeholder="automático"></div>
       <button class="b" id="bol-btn">📋 Exportar Boletim Misturador</button>
     </div>
-    <div style="font-size:11px;color:var(--txt-dim);margin-top:8px">Produção, matéria-prima e receitas das bateladas registradas (últimos 45 dias). Energia estimada pela corrente do inversor: P = √3 × 380 V × I × 0,85. Comparativo com um moinho de 800 kW.</div>
+    <div style="font-size:11px;color:var(--txt-dim);margin-top:8px">Produção, matéria-prima e receitas das bateladas registradas (últimos 45 dias). Energia estimada pela corrente do inversor: P = √3 × 380 V × I × 0,85. Comparativo com a moagem completa (950 kW, todos os equipamentos ligados).</div>
   </div>
   <div class="ts" id="ts"></div>
 </main>
@@ -388,7 +388,7 @@
   });
 
   // ── Boletim do misturador (PDF no padrão do boletim dos moinhos) ─────────
-  var KW_MOINHO = 800;
+  var KW_MOINHO = 950; // potência total da moagem: moinho + todos os equipamentos da linha ligados
   function fmtN(v, d){ if (d == null) d = 1; return v != null && isFinite(v) ? Number(v).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d }) : '—'; }
   function desenharGraficoBarras(categorias, series, opts){
     opts = opts || {};
@@ -515,18 +515,18 @@
         body: nomesRec.map(function(n){ return [n, String(recs[n].bateladas), fmtN(recs[n].kg / 1000, 2), tKg > 0 ? fmtN(recs[n].kg / tKg * 100, 1) + '%' : '—']; }),
         columnStyles: { 0: { halign: 'left', fontStyle: 'bold' } } });
 
-      // Comparativo misturador × moinho 800 kW
+      // Comparativo misturador × moagem completa (950 kW)
       doc.addPage();
-      doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.text('Comparativo — Pozomix no misturador × moinho de ' + KW_MOINHO + ' kW', 14, 16);
+      doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.text('Comparativo — Pozomix no misturador × moagem (' + KW_MOINHO + ' kW)', 14, 16);
       doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(120);
-      doc.text('Mesma produção do período (' + fmtN(t, 2) + ' t). Moinho: ' + KW_MOINHO + ' kW constantes; t/h do moinho = ' + (ref ? ref.fonte : 'não disponível') + '.', 14, 22, { maxWidth: 182 });
+      doc.text('Mesma produção do período (' + fmtN(t, 2) + ' t). Moagem: ' + KW_MOINHO + ' kW constantes (todos os equipamentos da moagem ligados); t/h do moinho = ' + (ref ? ref.fonte : 'não disponível') + '.', 14, 22, { maxWidth: 182 });
       doc.setTextColor(0);
       if (kwhtMix == null || kwhtMo == null){
         doc.setFontSize(10);
         doc.text(kwhtMix == null ? 'Sem medição de energia do misturador no período.' : 'Sem t/h de referência do moinho: informe o valor na tela antes de gerar.', 14, 34);
       } else {
         var hMo = t / thMo, eMo = t * kwhtMo, eMix = t * kwhtMix, econ = eMo - eMix;
-        tab({ startY: 30, theme: 'grid', head: [['Indicador', 'Misturador 600MX022', 'Moinho ' + KW_MOINHO + ' kW', 'Diferença']],
+        tab({ startY: 30, theme: 'grid', head: [['Indicador', 'Misturador 600MX022', 'Moagem ' + KW_MOINHO + ' kW', 'Diferença']],
           body: [
             ['Produção (t/h)', fmtN(thMix, 1), fmtN(thMo, 1), thMix && thMo ? fmtN(thMix / thMo, 1) + '× ' + (thMix >= thMo ? 'mais rápido' : 'mais lento') : '—'],
             ['Potência média (kW)', fmtN(kwMedio, 1), fmtN(KW_MOINHO, 0), '—'],
@@ -535,10 +535,10 @@
             ['Energia para ' + fmtN(t, 1) + ' t (kWh)', fmtN(eMix, 0), fmtN(eMo, 0), fmtN(econ, 0) + ' kWh (' + fmtN(econ / eMo * 100, 1) + '%) a menos'],
           ],
           columnStyles: { 0: { halign: 'left', fontStyle: 'bold' } } });
-        nota('Energia do moinho = ' + KW_MOINHO + ' kW × (produção ÷ t/h do moinho). Energia do misturador = medida no período (kWh/t × produção).\n' +
-          'Não considera os demais equipamentos (elevadores, separador, exaustores) nem a diferença de produto (moído × misturado).', fimY() + 5);
-        var img1 = desenharGraficoBarras(['Misturador', 'Moinho ' + KW_MOINHO + ' kW'], [{ nome: 'kWh/t', cor: '#10b981', valores: [kwhtMix, kwhtMo] }], { w: 480, h: 240, casas: 2 });
-        var img2 = desenharGraficoBarras(['Misturador', 'Moinho ' + KW_MOINHO + ' kW'], [{ nome: 't/h', cor: '#3b82f6', valores: [thMix || 0, thMo] }], { w: 480, h: 240, casas: 1 });
+        nota('Energia da moagem = ' + KW_MOINHO + ' kW (moinho e todos os equipamentos da linha) × (produção ÷ t/h do moinho).\n' +
+          'Energia do misturador = medida no período, só o motor do 600MX022 (kWh/t × produção). Não considera a diferença de produto (moído × misturado).', fimY() + 5);
+        var img1 = desenharGraficoBarras(['Misturador', 'Moagem ' + KW_MOINHO + ' kW'], [{ nome: 'kWh/t', cor: '#10b981', valores: [kwhtMix, kwhtMo] }], { w: 480, h: 240, casas: 2 });
+        var img2 = desenharGraficoBarras(['Misturador', 'Moagem ' + KW_MOINHO + ' kW'], [{ nome: 't/h', cor: '#3b82f6', valores: [thMix || 0, thMo] }], { w: 480, h: 240, casas: 1 });
         var y0 = fimY() + 18;
         doc.setFontSize(10); doc.text('Energia específica (kWh/t)', 14, y0); doc.addImage(img1, 'PNG', 14, y0 + 3, 88, 44);
         doc.text('Produção (t/h)', 108, y0); doc.addImage(img2, 'PNG', 108, y0 + 3, 88, 44);

@@ -96,6 +96,10 @@
   .tbl td,.tbl th{padding:6px 4px; border-bottom:1px dashed var(--card-b); text-align:right;}
   .tbl th{color:var(--txt-dim); font-weight:600; font-size:10.5px; text-transform:uppercase;}
   .tbl td:first-child,.tbl th:first-child{text-align:left;}
+  .bolbar{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+  .bolbar .inp{text-transform:none; font-size:14px; padding:9px 10px;}
+  .bolbar .b{grid-column:1 / -1;}
+  .bolbar label{font-size:11px; color:var(--txt-dim); display:block; margin-bottom:3px;}
 </style>
 </head>
 <body>
@@ -146,6 +150,18 @@
   <div class="sec"><span>Hoje</span><a class="btn-l" href="#" id="btn-hist">📅 45 dias</a></div>
   <div class="card" id="hoje"></div>
   <div id="aviso"></div>
+
+  <div class="sec"><span>Boletim do misturador</span></div>
+  <div class="card">
+    <div class="bolbar">
+      <div><label>Tipo</label><select class="inp" id="bol-tipo"><option value="diario">Boletim Diário</option><option value="mensal">Boletim Mensal</option></select></div>
+      <div><label>Data</label><input class="inp" type="date" id="bol-data"></div>
+      <div style="grid-column:1 / -1"><label>t/h do moinho para comparar (vazio = média real dos moinhos no período)</label>
+        <input class="inp" type="number" id="bol-th" inputmode="decimal" step="0.1" min="1" placeholder="automático"></div>
+      <button class="b" id="bol-btn">📋 Exportar Boletim Misturador</button>
+    </div>
+    <div style="font-size:11px;color:var(--txt-dim);margin-top:8px">Produção, matéria-prima e receitas das bateladas registradas (últimos 45 dias). Energia estimada pela corrente do inversor: P = √3 × 380 V × I × 0,85. Comparativo com um moinho de 800 kW.</div>
+  </div>
   <div class="ts" id="ts"></div>
 </main>
 
@@ -161,6 +177,24 @@
 </div>
 
 <script>
+  // jsPDF só é baixado na hora do PDF (mesmo esquema do mobile-status)
+  var jsPDFPromessa = null;
+  function carregarScript(src){
+    return new Promise(function(ok, falha){
+      var s = document.createElement('script');
+      s.src = src; s.onload = ok;
+      s.onerror = function(){ falha(new Error('sem internet para baixar ' + src.split('/').pop())); };
+      document.head.appendChild(s);
+    });
+  }
+  function comJsPDF(fn){
+    if (!jsPDFPromessa) {
+      jsPDFPromessa = carregarScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js')
+        .then(function(){ return carregarScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js'); })
+        .catch(function(e){ jsPDFPromessa = null; throw e; });
+    }
+    jsPDFPromessa.then(fn, function(e){ alert('Não foi possível gerar o PDF: ' + e.message); });
+  }
 (function(){
   'use strict';
   var dados = null, timer = null, desde = {}, acaoModal = null;
@@ -352,6 +386,223 @@
       $('m-cancel').onclick = function(){ $('m-user').style.display = $('m-pin').style.display = $('m-ok').style.display = ''; $('m-cancel').textContent = 'Cancelar'; };
     } catch(e){}
   });
+
+  // ── Boletim do misturador (PDF no padrão do boletim dos moinhos) ─────────
+  var KW_MOINHO = 800;
+  function fmtN(v, d){ if (d == null) d = 1; return v != null && isFinite(v) ? Number(v).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d }) : '—'; }
+  function desenharGraficoBarras(categorias, series, opts){
+    opts = opts || {};
+    var w = opts.w || 500, h = opts.h || 260;
+    var canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
+    var ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, w, h);
+    var mE = 46, mB = 32, mT = 18, mD = 10, aW = w - mE - mD, aH = h - mT - mB;
+    var maxVal = 0; series.forEach(function(s){ s.valores.forEach(function(v){ if (v > maxVal) maxVal = v; }); });
+    maxVal = maxVal * 1.2 || 1;
+    ctx.strokeStyle = '#ccc'; ctx.beginPath(); ctx.moveTo(mE, mT); ctx.lineTo(mE, h - mB); ctx.lineTo(w - mD, h - mB); ctx.stroke();
+    ctx.font = '10px Arial'; ctx.textAlign = 'right';
+    for (var g = 0; g <= 4; g++){
+      var y = h - mB - aH * g / 4; ctx.fillStyle = '#888'; ctx.fillText(fmtN(maxVal * g / 4, maxVal < 10 ? 1 : 0), mE - 5, y + 3);
+      ctx.strokeStyle = '#eee'; ctx.beginPath(); ctx.moveTo(mE, y); ctx.lineTo(w - mD, y); ctx.stroke();
+    }
+    var gW = aW / categorias.length, bW = gW / (series.length + 1);
+    categorias.forEach(function(cat, ci){
+      var xg = mE + gW * ci;
+      series.forEach(function(s, si){
+        var v = s.valores[ci] || 0, bH = aH * Math.min(v / maxVal, 1), x = xg + bW * (si + 0.5), y = h - mB - bH;
+        ctx.fillStyle = s.cor; ctx.fillRect(x, y, bW * 0.82, bH);
+        ctx.fillStyle = '#333'; ctx.textAlign = 'center'; ctx.font = '9px Arial';
+        ctx.fillText(fmtN(v, opts.casas != null ? opts.casas : 0), x + bW * 0.41, y - 3);
+      });
+      ctx.fillStyle = '#333'; ctx.textAlign = 'center'; ctx.font = '10px Arial'; ctx.fillText(cat, xg + gW / 2, h - mB + 14);
+    });
+    if (series.length > 1){
+      var lx = mE;
+      series.forEach(function(s){ ctx.fillStyle = s.cor; ctx.fillRect(lx, 3, 8, 8); ctx.fillStyle = '#333'; ctx.textAlign = 'left'; ctx.font = '9px Arial'; ctx.fillText(s.nome, lx + 11, 11); lx += ctx.measureText(s.nome).width + 26; });
+    }
+    return canvas.toDataURL('image/png');
+  }
+
+  // t/h de referência do moinho: Pozomix moído nos moinhos no período; senão média das linhas 501/502
+  function thMoinhoDe(app){
+    if (!app || !app.ok) return null;
+    var soma = 0, peso = 0;
+    (app.porProduto || []).forEach(function(p){ if (/pozo/i.test(p.produto || '') && p.thMedio > 0 && p.tonTotal > 0){ soma += p.thMedio * p.tonTotal; peso += p.tonTotal; } });
+    if (peso > 0) return { th: soma / peso, fonte: 'média real dos moinhos produzindo Pozomix no período (' + fmtN(peso, 1) + ' t)' };
+    ['501', '502'].forEach(function(l){ var r = (app.linhas || {})[l]; if (r && r.tonHMedia > 0 && r.tonTotal > 0){ soma += r.tonHMedia * r.tonTotal; peso += r.tonTotal; } });
+    if (peso > 0) return { th: soma / peso, fonte: 'média real das linhas 501/502 no período (sem Pozomix moído no período)' };
+    return null;
+  }
+
+  function exportarBoletimMisturador(){
+    var tipo = $('bol-tipo').value, dataStr = $('bol-data').value || new Date().toISOString().slice(0, 10);
+    var inicio, fim, periodoLabel, sufixo;
+    if (tipo === 'diario'){
+      inicio = new Date(dataStr + 'T00:00:00').getTime(); fim = Math.min(inicio + 86400000, Date.now());
+      periodoLabel = new Date(dataStr + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }); sufixo = dataStr;
+    } else {
+      var pp = dataStr.split('-'), ano = +pp[0], mes = +pp[1];
+      inicio = new Date(ano, mes - 1, 1).getTime(); fim = Math.min(new Date(ano, mes, 1).getTime(), Date.now());
+      periodoLabel = new Date(ano, mes - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }); sufixo = ano + '-' + String(mes).padStart(2, '0');
+    }
+    if (fim <= inicio){ alert('Período no futuro.'); return; }
+    var q = 'inicio=' + inicio + '&fim=' + fim;
+    $('bol-btn').disabled = true; $('bol-btn').textContent = 'Gerando…';
+    Promise.all([
+      fetch('/api/misturador/boletim?' + q, { cache: 'no-store' }).then(function(r){ return r.json(); }),
+      fetch('/api/boletim/app?' + q, { cache: 'no-store' }).then(function(r){ return r.json(); }).catch(function(){ return null; }),
+    ]).then(function(res){
+      var B = res[0]; if (!B || !B.ok) throw new Error((B && B.mensagem) || 'dados do misturador indisponíveis');
+      var rot = function(m){ return (B.rotulos || {})[m] || m; };
+      var dias = B.dias || [];
+      // Totais do período
+      var tKg = 0, nBat = 0, kwh = 0, minLig = 0, minAuto = 0, tComEnergia = 0, diasSemEnergia = 0, kgMat = {}, recs = {};
+      dias.forEach(function(d){
+        tKg += d.totalKg; nBat += d.bateladas;
+        Object.keys(d.kg).forEach(function(m){ kgMat[m] = (kgMat[m] || 0) + d.kg[m]; });
+        Object.keys(d.receitas).forEach(function(n){ var r = recs[n] || (recs[n] = { bateladas: 0, kg: 0 }); r.bateladas += d.receitas[n].bateladas; r.kg += d.receitas[n].kg; });
+        if (d.kwh != null){ kwh += d.kwh; minLig += d.minLigado || 0; minAuto += d.minAuto || 0; tComEnergia += d.totalKg / 1000; }
+        else if (d.totalKg > 0) diasSemEnergia++;
+      });
+      var t = tKg / 1000, temEnergia = dias.some(function(d){ return d.kwh != null; });
+      var hProd = (minAuto > 0 ? minAuto : minLig) / 60;
+      var thMix = hProd > 0 ? tComEnergia / hProd : null;
+      var kwhtMix = tComEnergia > 0 && temEnergia ? kwh / tComEnergia : null;
+      var kwMedio = minLig > 0 ? kwh / (minLig / 60) : null;
+      var manual = parseFloat(String($('bol-th').value).replace(',', '.'));
+      var ref = manual > 0 ? { th: manual, fonte: 'informado na tela' } : thMoinhoDe(res[1]);
+      var thMo = ref ? ref.th : null, kwhtMo = thMo ? KW_MOINHO / thMo : null;
+
+      var doc = new jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      var baseTab = { headStyles: { fillColor: [33, 38, 45] }, styles: { fontSize: 8.5, halign: 'center' }, margin: { left: 14, right: 14 } };
+      function tab(o){ var x = {}, k; for (k in baseTab) x[k] = baseTab[k]; for (k in o) x[k] = o[k]; doc.autoTable(x); }
+      function titulo(txt, y){ doc.setFontSize(12); doc.setFont(undefined, 'bold'); doc.text(txt, 14, y); doc.setFont(undefined, 'normal'); }
+      function nota(txt, y){ doc.setFontSize(7.5); doc.setTextColor(130); doc.text(txt, 14, y); doc.setTextColor(0); }
+      var fimY = function(){ return doc.lastAutoTable.finalY; };
+
+      doc.setFontSize(16); doc.setFont(undefined, 'bold');
+      doc.text('Boletim de Produção — Misturador 600MX022', 14, 16);
+      doc.setFontSize(11); doc.setFont(undefined, 'normal');
+      doc.text((tipo === 'diario' ? 'Boletim Diário' : 'Boletim Mensal') + ' — ' + periodoLabel + '  ·  Pozomix 7510 MIX (silo 7)', 14, 23);
+      doc.setFontSize(9); doc.setTextColor(120);
+      doc.text('Gerado em ' + new Date().toLocaleString('pt-BR') + '  ·  Fonte: bateladas registradas pelo CLP (MX22_*) no servidor', 14, 28);
+      doc.setTextColor(0);
+
+      tab({ startY: 34, theme: 'grid',
+        head: [['Produção', 'Bateladas', 'Média/batelada', 'Em dosagem', 't/h', 'Energia', 'kWh/t', 'Misturador ligado', 'Potência média']],
+        body: [[fmtN(t, 2) + ' t', String(nBat), nBat ? fmtN(tKg / nBat, 0) + ' kg' : '—', temEnergia ? fmtN(minAuto / 60, 1) + ' h' : '—',
+          fmtN(thMix, 1), temEnergia ? fmtN(kwh, 1) + ' kWh' : '—', fmtN(kwhtMix, 2), temEnergia ? fmtN(minLig / 60, 1) + ' h' : '—', fmtN(kwMedio, 1) + (kwMedio != null ? ' kW' : '')]] });
+      var nt = 'Energia estimada: P = 1,732 × 380 V × I × 0,85 (corrente do inversor, partida por inversor, rede 380 V) — estimativa conservadora abaixo de 60 Hz.\n' +
+        't/h = produção ÷ horas em dosagem automática.';
+      if (diasSemEnergia) nt += ' ' + diasSemEnergia + ' dia(s) com produção sem medição de energia (antes da instalação) ficam fora de kWh/t e t/h.';
+      if (!dias.length) nt = 'Sem bateladas registradas no período (o servidor guarda os últimos ' + B.diasHistorico + ' dias).';
+      nota(nt, fimY() + 5);
+
+      // Matéria-prima consumida
+      var mats = Object.keys(kgMat).sort(function(a, b){ return kgMat[b] - kgMat[a]; });
+      titulo('Matéria-prima consumida', fimY() + 18);
+      tab({ startY: fimY() + 21, theme: 'striped', head: [['Material', 'Consumo (t)', '% do total']],
+        body: mats.map(function(m){ return [rot(m), fmtN(kgMat[m] / 1000, 2), tKg > 0 ? fmtN(kgMat[m] / tKg * 100, 1) + '%' : '—']; })
+          .concat([['TOTAL', fmtN(t, 2), tKg > 0 ? '100%' : '—']]),
+        columnStyles: { 0: { halign: 'left', fontStyle: 'bold' } },
+        didParseCell: function(d){ if (d.section === 'body' && d.row.index === mats.length) d.cell.styles.fontStyle = 'bold'; } });
+      nota('Peso real de cada material registrado pela balança 600WF023 (acumuladores MX22_ACUM_KG do CLP).', fimY() + 5);
+
+      // Receitas
+      var nomesRec = Object.keys(recs);
+      titulo('Receitas utilizadas', fimY() + 15);
+      tab({ startY: fimY() + 18, theme: 'striped', head: [['Receita', 'Bateladas', 'Produção (t)', '% da produção']],
+        body: nomesRec.map(function(n){ return [n, String(recs[n].bateladas), fmtN(recs[n].kg / 1000, 2), tKg > 0 ? fmtN(recs[n].kg / tKg * 100, 1) + '%' : '—']; }),
+        columnStyles: { 0: { halign: 'left', fontStyle: 'bold' } } });
+
+      // Comparativo misturador × moinho 800 kW
+      doc.addPage();
+      doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.text('Comparativo — Pozomix no misturador × moinho de ' + KW_MOINHO + ' kW', 14, 16);
+      doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(120);
+      doc.text('Mesma produção do período (' + fmtN(t, 2) + ' t). Moinho: ' + KW_MOINHO + ' kW constantes; t/h do moinho = ' + (ref ? ref.fonte : 'não disponível') + '.', 14, 22, { maxWidth: 182 });
+      doc.setTextColor(0);
+      if (kwhtMix == null || kwhtMo == null){
+        doc.setFontSize(10);
+        doc.text(kwhtMix == null ? 'Sem medição de energia do misturador no período.' : 'Sem t/h de referência do moinho: informe o valor na tela antes de gerar.', 14, 34);
+      } else {
+        var hMo = t / thMo, eMo = t * kwhtMo, eMix = t * kwhtMix, econ = eMo - eMix;
+        tab({ startY: 30, theme: 'grid', head: [['Indicador', 'Misturador 600MX022', 'Moinho ' + KW_MOINHO + ' kW', 'Diferença']],
+          body: [
+            ['Produção (t/h)', fmtN(thMix, 1), fmtN(thMo, 1), thMix && thMo ? fmtN(thMix / thMo, 1) + '× ' + (thMix >= thMo ? 'mais rápido' : 'mais lento') : '—'],
+            ['Potência média (kW)', fmtN(kwMedio, 1), fmtN(KW_MOINHO, 0), '—'],
+            ['Energia específica (kWh/t)', fmtN(kwhtMix, 2), fmtN(kwhtMo, 2), fmtN(kwhtMo - kwhtMix, 2) + ' kWh/t a menos'],
+            ['Horas para ' + fmtN(t, 1) + ' t', fmtN(hProd * t / (tComEnergia || t), 1) + ' h', fmtN(hMo, 1) + ' h', '—'],
+            ['Energia para ' + fmtN(t, 1) + ' t (kWh)', fmtN(eMix, 0), fmtN(eMo, 0), fmtN(econ, 0) + ' kWh (' + fmtN(econ / eMo * 100, 1) + '%) a menos'],
+          ],
+          columnStyles: { 0: { halign: 'left', fontStyle: 'bold' } } });
+        nota('Energia do moinho = ' + KW_MOINHO + ' kW × (produção ÷ t/h do moinho). Energia do misturador = medida no período (kWh/t × produção).\n' +
+          'Não considera os demais equipamentos (elevadores, separador, exaustores) nem a diferença de produto (moído × misturado).', fimY() + 5);
+        var img1 = desenharGraficoBarras(['Misturador', 'Moinho ' + KW_MOINHO + ' kW'], [{ nome: 'kWh/t', cor: '#10b981', valores: [kwhtMix, kwhtMo] }], { w: 480, h: 240, casas: 2 });
+        var img2 = desenharGraficoBarras(['Misturador', 'Moinho ' + KW_MOINHO + ' kW'], [{ nome: 't/h', cor: '#3b82f6', valores: [thMix || 0, thMo] }], { w: 480, h: 240, casas: 1 });
+        var y0 = fimY() + 18;
+        doc.setFontSize(10); doc.text('Energia específica (kWh/t)', 14, y0); doc.addImage(img1, 'PNG', 14, y0 + 3, 88, 44);
+        doc.text('Produção (t/h)', 108, y0); doc.addImage(img2, 'PNG', 108, y0 + 3, 88, 44);
+      }
+
+      // Detalhe: diário = cada batelada; mensal = cada dia (+ gráficos)
+      doc.addPage();
+      if (tipo === 'diario'){
+        doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.text('Bateladas do dia', 14, 16); doc.setFont(undefined, 'normal');
+        var bats = B.bateladas || [], matsB = mats.length ? mats : [];
+        var corpoB = bats.map(function(r){
+          var n = r.bateladas || 1, num = r.seq == null ? '—' : (n > 1 ? (r.seq - n + 1) + '–' + r.seq : String(r.seq));
+          var desvio = (r.totalKg / (B.batelada * n) - 1) * 100;
+          return [num, new Date(r.ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }), r.receita || '—']
+            .concat(matsB.map(function(m){ return r.kg && r.kg[m] ? fmtN(r.kg[m], 0) : '—'; }), [fmtN(r.totalKg, 0), (desvio >= 0 ? '+' : '') + fmtN(desvio, 1) + '%']);
+        });
+        corpoB.push(['TOTAL', '', ''].concat(matsB.map(function(m){ return fmtN(kgMat[m], 0); }), [fmtN(tKg, 0), '']));
+        tab({ startY: 22, theme: 'striped', head: [['Nº', 'Hora', 'Receita'].concat(matsB.map(function(m){ return rot(m) + ' (kg)'; }), ['Total (kg)', 'Desvio'])],
+          body: corpoB, styles: { fontSize: 7.8, halign: 'center', cellPadding: 1 },
+          columnStyles: { 2: { halign: 'left' } },
+          didParseCell: function(d){
+            if (d.section === 'body' && d.row.index === corpoB.length - 1) d.cell.styles.fontStyle = 'bold';
+            if (d.section === 'body' && d.column.index === corpoB[0].length - 1 && d.row.index < corpoB.length - 1){
+              var v = parseFloat(String(d.cell.raw).replace(',', '.')); if (Math.abs(v) > 10) d.cell.styles.textColor = [200, 30, 30];
+            }
+          } });
+        nota('Desvio em relação a ' + fmtN(B.batelada, 0) + ' kg por batelada (tolerância 10%, em vermelho acima disso).', fimY() + 5);
+      } else {
+        doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.text('Detalhamento por Dia', 14, 16); doc.setFont(undefined, 'normal');
+        var corpoD = dias.map(function(d){
+          var hA = (d.minAuto || 0) / 60, p = d.data.split('-');
+          return [p[2] + '/' + p[1], d.seqIni != null ? d.seqIni + '–' + d.seqFim : '—', String(d.bateladas), fmtN(d.totalKg / 1000, 2)]
+            .concat(mats.map(function(m){ return d.kg[m] ? fmtN(d.kg[m] / 1000, 2) : '—'; }),
+              [d.kwh != null ? fmtN(d.kwh, 1) : '—', d.kwh != null && d.totalKg > 0 ? fmtN(d.kwh / (d.totalKg / 1000), 2) : '—', d.minAuto ? fmtN(hA, 1) : '—', hA > 0 ? fmtN(d.totalKg / 1000 / hA, 1) : '—']);
+        });
+        corpoD.push(['TOTAL', '', String(nBat), fmtN(t, 2)].concat(mats.map(function(m){ return fmtN(kgMat[m] / 1000, 2); }),
+          [temEnergia ? fmtN(kwh, 1) : '—', fmtN(kwhtMix, 2), temEnergia ? fmtN(minAuto / 60, 1) : '—', fmtN(thMix, 1)]));
+        tab({ startY: 22, theme: 'striped',
+          head: [['Data', 'Nº bateladas', 'Bat.', 'Total (t)'].concat(mats.map(function(m){ return rot(m) + ' (t)'; }), ['Energia (kWh)', 'kWh/t', 'Horas dos.', 't/h'])],
+          body: corpoD, styles: { fontSize: 7.5, halign: 'center', cellPadding: 1 }, margin: { left: 10, right: 10 },
+          columnStyles: { 0: { halign: 'left', fontStyle: 'bold' } },
+          didParseCell: function(d){ if (d.section === 'body' && d.row.index === corpoD.length - 1) d.cell.styles.fontStyle = 'bold'; } });
+        if (dias.length){
+          doc.addPage();
+          doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.text('Gráficos — Misturador', 14, 16); doc.setFont(undefined, 'normal');
+          var lab = dias.map(function(d){ return d.data.split('-')[2]; });
+          doc.setFontSize(10); doc.text('Produção por dia (t)', 14, 26);
+          doc.addImage(desenharGraficoBarras(lab, [{ nome: 't', cor: '#3b82f6', valores: dias.map(function(d){ return d.totalKg / 1000; }) }], { w: 720, h: 230, casas: 1 }), 'PNG', 14, 29, 182, 58);
+          doc.text('Energia por dia (kWh)', 14, 94);
+          doc.addImage(desenharGraficoBarras(lab, [{ nome: 'kWh', cor: '#10b981', valores: dias.map(function(d){ return d.kwh || 0; }) }], { w: 720, h: 230, casas: 0 }), 'PNG', 14, 97, 182, 58);
+          doc.text('Matéria-prima por dia (t)', 14, 162);
+          var cores = ['#f59e0b', '#64748b', '#8b5cf6', '#ef4444'];
+          doc.addImage(desenharGraficoBarras(lab, mats.map(function(m, i){ return { nome: rot(m), cor: cores[i % cores.length], valores: dias.map(function(d){ return (d.kg[m] || 0) / 1000; }) }; }), { w: 720, h: 230, casas: 1 }), 'PNG', 14, 165, 182, 58);
+        }
+      }
+
+      var np = doc.getNumberOfPages();
+      for (var pg = 1; pg <= np; pg++){ doc.setPage(pg); doc.setFontSize(8); doc.setTextColor(130); doc.text('Página ' + pg + ' de ' + np, 196, 290, { align: 'right' }); }
+      doc.save('boletim_misturador_' + tipo + '_' + sufixo + '.pdf');
+    }).catch(function(e){ alert('Erro ao gerar boletim: ' + e.message); })
+      .then(function(){ $('bol-btn').disabled = false; $('bol-btn').textContent = '📋 Exportar Boletim Misturador'; });
+  }
+  (function(){ var d = new Date(); $('bol-data').value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); })();
+  $('bol-btn').addEventListener('click', function(){ comJsPDF(exportarBoletimMisturador); });
 
   ler();
 })();

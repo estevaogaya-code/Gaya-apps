@@ -23,6 +23,13 @@
  * (45 dias). aplicarNoPayload() leva o total do dia para o app Cimento Gaúcho
  * (aba Saídas: pozo7510mix, receitaMix e mixConsumo = t reais por material).
  *
+ * Energia: a cada ciclo lê M600MX022 (.6 ligado), a corrente do inversor e o MX22_PASSO e
+ * integra P = √3 × 380 V × I × 0,85 / 1000 (kW) enquanto o misturador está ligado; guarda
+ * por dia kWh, minutos ligado e minutos em dosagem automática (45 dias, mesmo arquivo).
+ * A corrente lida é a do motor (saída do inversor): com 380 V fixo a estimativa fica
+ * conservadora (para cima) quando o motor roda abaixo de 60 Hz.
+ * GET /api/misturador/boletim?inicio&fim devolve os dados do boletim (PDF gerado na tela).
+ *
  * O resto da tela (balança, válvulas, misturador) só é lido com a tela aberta.
  */
 'use strict';
@@ -46,6 +53,8 @@ const MATERIAIS = [
 ];
 const TAG_SELETORA = 'ED_600MX022_DOSAGEM';
 const BALANCA_MAX = 6000, BATELADA = 1000, DIAS_HIST = 45, N_PROD = 4;
+const TENSAO_V = 380, FP = 0.85, GAP_MAX_MS = 120000; // energia: rede 380 V, mesmo FP do CLP (potência dos exaustores)
+const diaDe = ts => { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const PASSOS = { 0: 'Parado', 10: 'Aguardando balança vazia / condições', 20: 'Próximo produto', 22: 'Escolhendo cápsula',
   25: 'Dosando', 30: 'Estabilizando', 40: 'Descarregando', 45: 'Registrando batelada', 90: 'PAUSA — sem cápsula com material' };
 const ALARMES = ['Produto fora da tolerância de 10%', 'Cápsula vazia (trocou para a outra)', 'Nenhuma cápsula com o produto — dosagem pausada',
@@ -101,8 +110,9 @@ function criarMisturador(opts) {
   try { config = { ...config, ...JSON.parse(fs.readFileSync(ARQ, 'utf8')) }; } catch (_) {}
   // migração: nomes livres da primeira versão -> material do app
   for (const c of CAPSULAS) config.capsulas[c.id] = materialDe(config.capsulas[c.id]);
-  let hist = { ultimoSeq: null, ultimoAcum: null, registros: [] };
+  let hist = { ultimoSeq: null, ultimoAcum: null, registros: [], energia: {} };
   try { hist = { ...hist, ...JSON.parse(fs.readFileSync(ARQ_HIST, 'utf8')) }; } catch (_) {}
+  if (!hist.energia || typeof hist.energia !== 'object') hist.energia = {};
   // Registros antigos sem número da batelada (MX22_BAT_SEQ): reconstitui de trás para frente
   if (hist.ultimoSeq != null && hist.registros.some(r => r.seq == null)) {
     let cur = hist.ultimoSeq;
@@ -170,6 +180,32 @@ function criarMisturador(opts) {
     await salvar(ARQ_HIST, hist);
   }
 
+  // ── Energia (integra a potência a cada ciclo) ─────────────────────────────
+  let ultimaAmostra = 0, ultimoSalvoEnergia = 0;
+  async function lerEnergia(PLC) {
+    const mx = await lerTag(PLC, 'M600MX022');
+    const a = await lerTag(PLC, 'EA_REDE_600MX022_CORRENTE_AJUSTE[9]');
+    const passo = await lerTag(PLC, 'MX22_PASSO');
+    const t = agora(), dt = t - ultimaAmostra;
+    ultimaAmostra = t;
+    if (mx == null || dt <= 0 || dt > GAP_MAX_MS) return;     // sem leitura ou servidor parado: não inventa
+    const dia = diaDe(t);
+    const e = hist.energia[dia] || (hist.energia[dia] = { kwh: 0, minLigado: 0, minAuto: 0 });
+    const ligado = bit(mx, 6), p = Number(passo);
+    if (ligado) {
+      const kw = Math.max(0, Number(a) || 0) * TENSAO_V * Math.sqrt(3) * FP / 1000;
+      e.kwh += kw * dt / 3600000;
+      e.minLigado += dt / 60000;
+    }
+    if (p >= 10 && p <= 45) e.minAuto += dt / 60000;             // dosagem automática rodando (fora parado/pausa)
+    if (t - ultimoSalvoEnergia > 300000) {
+      ultimoSalvoEnergia = t;
+      const corte = diaDe(t - DIAS_HIST * 86400000);
+      for (const k of Object.keys(hist.energia)) if (k < corte) delete hist.energia[k];
+      await salvar(ARQ_HIST, hist);
+    }
+  }
+
   // Chamado pelo server.js a cada ciclo
   async function lerCiclo(PLC) {
     ultimoCiclo = agora();
@@ -178,6 +214,7 @@ function criarMisturador(opts) {
       try { job.resolve(await job.fn(PLC)); } catch (e) { job.reject(e); }
     }
     try { await lerBateladas(PLC); } catch (e) { console.error('[MISTURADOR] bateladas:', e.message); }
+    try { await lerEnergia(PLC); } catch (e) { console.error('[MISTURADOR] energia:', e.message); }
     if (agora() - ultimoInteresse > interesseMs) return;
     const n = v => (v == null ? null : Number(v));
     const peso = n(await lerTag(PLC, 'EA_600WF023_WT_U01_AJUSTE[9]'));
@@ -293,6 +330,41 @@ function criarMisturador(opts) {
 
   router.get('/api/misturador/historico', (req, res) => {
     res.json({ ok: true, dias: Object.values(resumoPorDia()).sort((a, b) => b.data.localeCompare(a.data)) });
+  });
+
+  // Dados do boletim: por dia (bateladas, kg por material, receitas, energia) e as bateladas do período
+  router.get('/api/misturador/boletim', (req, res) => {
+    const inicio = Number(req.query.inicio), fim = Number(req.query.fim);
+    if (!Number.isFinite(inicio) || !Number.isFinite(fim) || fim <= inicio)
+      return res.status(400).json({ ok: false, erro: 'periodo_invalido', mensagem: 'Informe inicio e fim (ms).' });
+    const regs = hist.registros.filter(r => r.ts >= inicio && r.ts < fim);
+    const dias = {};
+    const novoDia = data => ({ data, bateladas: 0, totalKg: 0, kg: {}, receitas: {}, kwh: null, minLigado: null, minAuto: null, seqIni: null, seqFim: null });
+    for (const r of regs) {
+      const k = diaDe(r.ts), x = dias[k] || (dias[k] = novoDia(k));
+      x.bateladas += r.bateladas || 0; x.totalKg += r.totalKg || 0;
+      Object.entries(r.kg || {}).forEach(([m, v]) => { x.kg[m] = (x.kg[m] || 0) + v; });
+      const nome = r.receita || '—', rc = x.receitas[nome] || (x.receitas[nome] = { bateladas: 0, kg: 0 });
+      rc.bateladas += r.bateladas || 0; rc.kg += r.totalKg || 0;
+      if (r.seq != null) {
+        const ini = r.seq - (r.bateladas || 1) + 1;
+        if (x.seqIni == null || ini < x.seqIni) x.seqIni = ini;
+        if (x.seqFim == null || r.seq > x.seqFim) x.seqFim = r.seq;
+      }
+    }
+    for (const [k, e] of Object.entries(hist.energia)) {
+      const t0 = new Date(`${k}T00:00:00`).getTime();
+      if (t0 + 86400000 <= inicio || t0 >= fim) continue;
+      const x = dias[k] || (dias[k] = novoDia(k));
+      x.kwh = e.kwh; x.minLigado = e.minLigado; x.minAuto = e.minAuto;
+    }
+    res.json({
+      ok: true, inicio, fim, tensao: TENSAO_V, fp: FP, batelada: BATELADA, diasHistorico: DIAS_HIST,
+      rotulos: Object.fromEntries(MATERIAIS.map(m => [m.chave, m.rotulo])),
+      energiaDesde: Object.keys(hist.energia).sort()[0] || null,
+      dias: Object.values(dias).sort((a, b) => a.data.localeCompare(b.data)),
+      bateladas: regs.map(r => ({ ts: r.ts, seq: r.seq, bateladas: r.bateladas, totalKg: r.totalKg, kg: r.kg, receita: r.receita })),
+    });
   });
 
   router.post('/api/misturador/capsulas', (req, res) => {

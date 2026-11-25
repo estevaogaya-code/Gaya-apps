@@ -53,7 +53,8 @@ async function montar(o = {}) {
   const get = async () => (await fetch(base + '/api/misturador')).json();
   const post = async (url, corpo, pin = '9999') => { const r = await fetch(base + url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-receitas-pin': pin }, body: JSON.stringify(corpo) }); return { status: r.status, corpo: await r.json() }; };
   const fechar = async () => { ciclo = false; await sleep(40); await new Promise(r => srv.close(r)); fs.rmSync(dir, { recursive: true, force: true }); };
-  return { m, plc, mem, escritas, get, post, fechar, dir, avancar: ms => { tempo += ms; } };
+  const api = async url => { const r = await fetch(base + url); return { status: r.status, corpo: await r.json() }; };
+  return { m, plc, mem, escritas, get, post, api, fechar, dir, avancar: ms => { tempo += ms; } };
 }
 
 test('montarReceitaClp: produtos pelas cápsulas, % e validações', () => {
@@ -154,5 +155,44 @@ test('bateladas: registros antigos sem número recebem o MX22_BAT_SEQ reconstitu
   try {
     const j = await t.get();
     assert.deepEqual(j.ultimos.map(r => r.seq), [20, 19, 17]);
+  } finally { await t.fechar(); }
+});
+
+test('energia: integra √3·380·I·0,85 com o misturador ligado e vai para o boletim', async () => {
+  const t = await montar();
+  try {
+    const kw = 4.27 * 380 * Math.sqrt(3) * 0.85 / 1000;
+    await sleep(60);                                   // primeira amostra (referência)
+    for (let i = 0; i < 10; i++) { t.avancar(30000); await sleep(50); }  // 5 min ligado, passo 25 (auto)
+    t.mem.M600MX022 = B(5) | B(8); t.mem.MX22_PASSO = 0;                 // desligado e parado
+    t.avancar(30000); await sleep(50);
+    t.avancar(10 * 60000); await sleep(50);            // buraco de 10 min (servidor parado): não conta
+    const ini = new Date(2026, 10, 7).getTime();
+    const r = await t.api(`/api/misturador/boletim?inicio=${ini}&fim=${ini + 86400000}`);
+    assert.equal(r.status, 200);
+    const d = r.corpo.dias.find(x => x.data === '2026-11-07');
+    assert.ok(Math.abs(d.minLigado - 5) < 0.01, String(d.minLigado));
+    assert.ok(Math.abs(d.minAuto - 5) < 0.01, String(d.minAuto));
+    assert.ok(Math.abs(d.kwh - kw * 5 / 60) < 1e-3, String(d.kwh));
+    assert.equal(r.corpo.tensao, 380);
+    const ruim = await t.api('/api/misturador/boletim?inicio=5&fim=1');
+    assert.equal(ruim.status, 400);
+  } finally { await t.fechar(); }
+});
+
+test('boletim: bateladas, materiais e receitas por dia', async () => {
+  const ts = new Date(2026, 10, 7, 9, 0).getTime();
+  const reg = (seq, n, kgC) => ({ ts, seq, bateladas: n, kg: { Cinza: kgC, 'CINZA AMBAR': 1000 * n - kgC }, totalKg: 1000 * n, receita: 'R1', rcp: 1 });
+  const t = await montar({ hist: { ultimoSeq: 13, ultimoAcum: [0, 0, 0, 0], registros: [reg(11, 1, 500), reg(13, 2, 1000)] } });
+  try {
+    const ini = new Date(2026, 10, 7).getTime();
+    const r = await t.api(`/api/misturador/boletim?inicio=${ini}&fim=${ini + 86400000}`);
+    const d = r.corpo.dias[0];
+    assert.equal(d.bateladas, 3); assert.equal(d.totalKg, 3000);
+    assert.deepEqual(d.kg, { Cinza: 1500, 'CINZA AMBAR': 1500 });
+    assert.deepEqual(d.receitas, { R1: { bateladas: 3, kg: 3000 } });
+    assert.equal(d.seqIni, 11); assert.equal(d.seqFim, 13);
+    assert.equal(r.corpo.bateladas.length, 2);
+    assert.equal(r.corpo.rotulos.Cinza, 'Cinza Braskem');
   } finally { await t.fechar(); }
 });

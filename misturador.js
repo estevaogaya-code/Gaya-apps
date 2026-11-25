@@ -23,11 +23,11 @@
  * (45 dias). aplicarNoPayload() leva o total do dia para o app Cimento Gaúcho
  * (aba Saídas: pozo7510mix, receitaMix e mixConsumo = t reais por material).
  *
- * Energia: a cada ciclo lê M600MX022 (.6 ligado), a corrente do inversor e o MX22_PASSO e
- * integra P = √3 × 380 V × I × 0,85 / 1000 (kW) enquanto o misturador está ligado; guarda
- * por dia kWh, minutos ligado e minutos em dosagem automática (45 dias, mesmo arquivo).
- * A corrente lida é a do motor (saída do inversor): com 380 V fixo a estimativa fica
- * conservadora (para cima) quando o motor roda abaixo de 60 Hz.
+ * Energia: a cada ciclo lê M600MX022 (.6 ligado), corrente e frequência do inversor e o
+ * MX22_PASSO e integra P = √3 × V × I × 0,85 / 1000 (kW) enquanto o misturador está ligado.
+ * A corrente lida é a do motor (saída do inversor), então V é a tensão do motor pela curva
+ * V/f: V = 380 × Hz / 60 (limitada a 380 V; sem leitura de Hz usa 380 V). Guarda por dia
+ * kWh, minutos ligado e minutos em dosagem automática (45 dias, mesmo arquivo).
  * GET /api/misturador/boletim?inicio&fim devolve os dados do boletim (PDF gerado na tela).
  *
  * O resto da tela (balança, válvulas, misturador) só é lido com a tela aberta.
@@ -53,7 +53,10 @@ const MATERIAIS = [
 ];
 const TAG_SELETORA = 'ED_600MX022_DOSAGEM';
 const BALANCA_MAX = 6000, BATELADA = 1000, DIAS_HIST = 45, N_PROD = 4;
-const TENSAO_V = 380, FP = 0.85, GAP_MAX_MS = 120000; // energia: rede 380 V, mesmo FP do CLP (potência dos exaustores)
+const TENSAO_V = 380, FREQ_NOM = 60, FP = 0.85, GAP_MAX_MS = 120000; // energia: rede 380 V / 60 Hz, mesmo FP do CLP (potência dos exaustores)
+// Tensão no motor pela curva V/f do inversor (corrente lida é a do motor)
+const tensaoMotor = hz => (hz == null || !Number.isFinite(Number(hz)) ? TENSAO_V : TENSAO_V * Math.min(1, Math.max(0, Number(hz)) / FREQ_NOM));
+const potenciaKw = (a, hz) => Math.max(0, Number(a) || 0) * tensaoMotor(hz) * Math.sqrt(3) * FP / 1000;
 const diaDe = ts => { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const PASSOS = { 0: 'Parado', 10: 'Aguardando balança vazia / condições', 20: 'Próximo produto', 22: 'Escolhendo cápsula',
   25: 'Dosando', 30: 'Estabilizando', 40: 'Descarregando', 45: 'Registrando batelada', 90: 'PAUSA — sem cápsula com material' };
@@ -185,6 +188,7 @@ function criarMisturador(opts) {
   async function lerEnergia(PLC) {
     const mx = await lerTag(PLC, 'M600MX022');
     const a = await lerTag(PLC, 'EA_REDE_600MX022_CORRENTE_AJUSTE[9]');
+    const hz = await lerTag(PLC, 'EA_REDE_600MX022_VELOCIDADE_AJUSTE[9]');
     const passo = await lerTag(PLC, 'MX22_PASSO');
     const t = agora(), dt = t - ultimaAmostra;
     ultimaAmostra = t;
@@ -193,8 +197,7 @@ function criarMisturador(opts) {
     const e = hist.energia[dia] || (hist.energia[dia] = { kwh: 0, minLigado: 0, minAuto: 0 });
     const ligado = bit(mx, 6), p = Number(passo);
     if (ligado) {
-      const kw = Math.max(0, Number(a) || 0) * TENSAO_V * Math.sqrt(3) * FP / 1000;
-      e.kwh += kw * dt / 3600000;
+      e.kwh += potenciaKw(a, hz) * dt / 3600000;
       e.minLigado += dt / 60000;
     }
     if (p >= 10 && p <= 45) e.minAuto += dt / 60000;             // dosagem automática rodando (fora parado/pausa)
@@ -359,7 +362,7 @@ function criarMisturador(opts) {
       x.kwh = e.kwh; x.minLigado = e.minLigado; x.minAuto = e.minAuto;
     }
     res.json({
-      ok: true, inicio, fim, tensao: TENSAO_V, fp: FP, batelada: BATELADA, diasHistorico: DIAS_HIST,
+      ok: true, inicio, fim, tensao: TENSAO_V, freqNominal: FREQ_NOM, fp: FP, batelada: BATELADA, diasHistorico: DIAS_HIST,
       rotulos: Object.fromEntries(MATERIAIS.map(m => [m.chave, m.rotulo])),
       energiaDesde: Object.keys(hist.energia).sort()[0] || null,
       dias: Object.values(dias).sort((a, b) => a.data.localeCompare(b.data)),
@@ -430,5 +433,6 @@ function criarMisturador(opts) {
 module.exports = criarMisturador;
 module.exports.estadoValvula = estadoValvula;
 module.exports.montarReceitaClp = montarReceitaClp;
+module.exports.potenciaKw = potenciaKw;
 module.exports.CAPSULAS = CAPSULAS;
 module.exports.MATERIAIS = MATERIAIS;

@@ -158,10 +158,10 @@ test('bateladas: registros antigos sem número recebem o MX22_BAT_SEQ reconstitu
   } finally { await t.fechar(); }
 });
 
-test('energia: integra √3·380·I·0,85 com o misturador ligado e vai para o boletim', async () => {
+test('energia: integra √3·(380·Hz/60)·I·0,85 com o misturador ligado e vai para o boletim', async () => {
   const t = await montar();
   try {
-    const kw = 4.27 * 380 * Math.sqrt(3) * 0.85 / 1000;
+    const kw = 4.27 * (380 * 30 / 60) * Math.sqrt(3) * 0.85 / 1000; // inversor a 30 Hz
     await sleep(60);                                   // primeira amostra (referência)
     for (let i = 0; i < 10; i++) { t.avancar(30000); await sleep(50); }  // 5 min ligado, passo 25 (auto)
     t.mem.M600MX022 = B(5) | B(8); t.mem.MX22_PASSO = 0;                 // desligado e parado
@@ -195,4 +195,14 @@ test('boletim: bateladas, materiais e receitas por dia', async () => {
     assert.equal(r.corpo.bateladas.length, 2);
     assert.equal(r.corpo.rotulos.Cinza, 'Cinza Braskem');
   } finally { await t.fechar(); }
+});
+
+test('potenciaKw: tensão do motor pela curva V/f', () => {
+  const { potenciaKw } = criarMisturador;
+  const k = 10 * Math.sqrt(3) * 0.85 / 1000;
+  assert.ok(Math.abs(potenciaKw(10, 60) - 380 * k) < 1e-9);
+  assert.ok(Math.abs(potenciaKw(10, 30) - 190 * k) < 1e-9);
+  assert.ok(Math.abs(potenciaKw(10, 75) - 380 * k) < 1e-9);   // acima de 60 Hz: 380 V
+  assert.ok(Math.abs(potenciaKw(10, null) - 380 * k) < 1e-9); // sem Hz: 380 V
+  assert.equal(potenciaKw(-3, 60), 0);
 });
